@@ -1,382 +1,577 @@
-# 🔒 DeadlockPredictionUsingGNN
-### A Production-Grade, Research-Quality OS Deadlock Prediction Framework using Graph Neural Networks
+# 🔒 DeadlockGNN — Real-Time OS Deadlock Prediction with Graph Neural Networks
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch)](https://pytorch.org)
-[![PyG](https://img.shields.io/badge/PyTorch_Geometric-2.x-orange)](https://pyg.org)
-[![Streamlit](https://img.shields.io/badge/Streamlit-Interactive_Demo-red?logo=streamlit)](https://streamlit.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+> **Predicting operating system deadlocks before they happen using a hybrid Relational GCN + GRU architecture, trained on 200,000+ synthetic kernel states, with live monitoring of a real xv6-riscv kernel.**
 
 ---
 
-## 🚀 What This Project Is
+## 📌 Table of Contents
 
-This repository implements a **complete, end-to-end OS Deadlock Prediction Research System** built around **Graph Neural Networks (GNNs)**, specifically **Relational Graph Convolutional Networks (RGCNs)** and a novel **Temporal RGCN + GRU hybrid architecture**.
-
-Instead of making toy examples, this project simulates a **real operating system environment** — with Poisson-distributed process arrivals, FIFO resource queues, multi-instance resources, and hold-cycle dynamics — and trains a neural network to detect and **predict future deadlocks** with **98.16% accuracy and a 0.9990 AUC-ROC** on 200,000 simulated OS states.
-
-The system spans three major capabilities that together form a coherent OS research systems framework:
-
-> 1. **Static Deadlock Detection** using RGCN on Resource Allocation Graph snapshots  
-> 2. **Temporal Deadlock Forecasting** using RGCN + GRU on evolving RAG sequences  
-> 3. **Explainable AI Visualizations** using Monte Carlo Shapley Node Attribution  
-> 4. **🚀 Live Kernel Monitoring** via real-time xv6-riscv instrumentation and neural stream processing  
-
----
-
-## 🏆 Key Achievements
-
-| Metric | Value |
-|---|---|
-| Static Model Accuracy (200k dataset) | **98.16%** |
-| Static F1 Score | **97.77%** |
-| Temporal Accuracy (50k sequence dataset) | **91.53%** |
-| Temporal F1 Score | **89.55%** |
-| AUC-ROC (Static / Temporal) | **0.9990** / **0.9667** |
-| Inference Latency | **0.0007s** (Graph) / **0.0028s** (Sequence) |
-| Dataset Generation Speed | **~1,100 graphs/second** |
-| Temporal Sequences Generated | **50,000** sequences @ 974 seq/sec |
-| Temporal Deadlock Balance | **42% deadlock rate** (near-ideal for ML) |
+1. [Project Overview](#-project-overview)
+2. [Architecture Diagram](#-architecture-diagram)
+3. [Data Sources & Dataset Types](#-data-sources--dataset-types)
+4. [Feature Engineering: The Resource Allocation Graph](#-feature-engineering-the-resource-allocation-graph)
+5. [Models](#-models)
+6. [Frontend: The Streamlit Dashboard](#-frontend-the-streamlit-dashboard)
+7. [Live xv6 Kernel Monitoring](#-live-xv6-kernel-monitoring)
+8. [Metrics & Evaluation](#-metrics--evaluation)
+9. [Step-by-Step Execution Commands](#-step-by-step-execution-commands)
 
 ---
 
-## 🖥 Multi-Tab Streamlit Interactive Application
+## 🚀 Project Overview
 
-To demonstrate the real-world application of this research, the repository ships with a **Production-Grade Streamlit Web Application** (`demo.py`) featuring two distinct analytical modes:
+**DeadlockGNN** is an end-to-end AI system that applies Graph Neural Network techniques to the classic Operating Systems problem of **deadlock detection and prediction**.
 
-### Mode 1: Static Snapshot & Shapley XAI
-Instead of outputting simple confidence integers, the UI integrates **Monte Carlo Shapley Node Attributions**. When the model predicts an OS deadlock, the interface dynamically paints a heatmap directly onto the topological RAG graphic (via a `steelblue → darkorange → crimson` color map), visually flagging **exactly which OS processes are mechanically responsible for the crash**.
-*This bridges the gap between Black-Box neural networks and actionable Kernel-level interventions.*
+### What it Does
 
-### Mode 2: Temporal Sequence Animation
-When engaging the "Temporal Sequence" tab, Streamlit natively spins up the Python `OSEngine` in memory. It simulates a raw OS timeline, captures 4 consecutive sequential snapshots, chains them into a PyTorch Geographic multidimensional tensor, and runs them through the **Recurrent GRU**. It natively outputs the *future trajectory probability* at `T+1` and provides an interactive slider to manually scrub through the chronological timeline frame-by-frame. 
+The system can operate in two modes:
+
+| Mode | Description |
+|------|-------------|
+| **Static Snapshot** | Given a single graph snapshot of OS state, predict if a deadlock currently exists |
+| **Temporal Forecast** | Given a sequence of 8 historical OS snapshots, predict if the **next** OS state will deadlock |
+
+### Why It's Interesting
+
+Traditional deadlock detection algorithms (like Banker's Algorithm) only work on *current* state and require complete knowledge of future resource needs. DeadlockGNN instead **learns** structural patterns of deadlock from graph topology alone, and can **forecast** deadlocks before they happen — just like how a weather model predicts rain from patterns, not from knowing all future conditions.
 
 ---
 
-## 🧠 Machine Learning Architecture
-
-### 1. Static RGCN Model (`deadlock_gnn/models/rgcn_model.py`)
-
-The **Relational Graph Convolutional Network (RGCN)** handles heterogeneous edge types — `request` edges (Process → Resource) and `assignment` edges (Resource → Process) — meaning each edge type gets its own learned weight matrix. This is fundamentally more powerful than standard GCNs which treat all edges identically.
+## 🏗 Architecture Diagram
 
 ```
-Input: 7-dimensional node feature vectors
-  ↓ RGCNConv Layer 1 (→ 64 channels)
-  ↓ RGCNConv Layer 2 (→ 64 channels)  
-  ↓ RGCNConv Layer 3 (→ 64 channels)
-  ↓ Global Add Pooling (graph-level embedding)
-  ↓ Linear(64 → 32) + ReLU + Dropout
-  ↓ Linear(32 → 1) + Sigmoid
-Output: P(deadlock) ∈ [0, 1]
+┌─────────────────────────────────────────────────────────────────┐
+│                        DATA LAYER                               │
+│                                                                 │
+│  Synthetic OS Simulator ──► 200,000 RAG snapshots (dataset/)   │
+│  Temporal Simulator     ──► 50,000 sequences (dataset_temporal/)│
+│  xv6-riscv Kernel       ──►  Real-time [GNN_TRACE] log stream  │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     GRAPH REPRESENTATION                        │
+│                                                                 │
+│   Resource Allocation Graph (RAG) — NetworkX DiGraph           │
+│   Nodes: Processes (P) + Resources (R)                         │
+│   Edges: Request (P→R) | Assignment (R→P)                      │
+│   Node Features: 7-dimensional vector per node                 │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        MODEL LAYER                              │
+│                                                                 │
+│  Static: DeadlockRGCN (3-layer RGCN + MLP Classifier)          │
+│  Temporal: TemporalRGCNGRU (RGCN Encoder + 2-layer GRU)        │
+│  XAI: Monte-Carlo Shapley Attribution                           │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      FRONTEND LAYER                             │
+│                                                                 │
+│   Streamlit Dashboard (demo.py)                                 │
+│   Tab 1: Static Snapshot + Shapley XAI                         │
+│   Tab 2: Temporal Sequence Animation                            │
+│   Tab 3: 🔴 Live xv6 Kernel Monitoring                          │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-### 2. Temporal RGCN + GRU Model (`deadlock_gnn/models/temporal_rgcn_gru.py`)
-
-The temporal model takes **4 consecutive RAG snapshots** of an evolving OS state and predicts whether the next OS tick will produce a deadlock — a true **time-series forecasting** problem over graphs.
-
-```
-For each timestep t in [t-3, t-2, t-1, t]:
-    G_t → RGCN Encoder → Global Pooling → embedding_t (64-dim)
-
-[embedding_t-3, embedding_t-2, embedding_t-1, embedding_t]
-    → GRU (2 layers, hidden=128)
-    → Final hidden state
-    → Linear(128 → 64) + ReLU + Dropout
-    → Linear(64 → 1) + Sigmoid
-Output: P(deadlock at t+1) ∈ [0, 1]
-```
-
-#### 🧬 Cross-Domain Transfer Learning (The "Simulation Fusion" Architecture)
-A major bottleneck in Temporal Graph Networks is that training a GRU simultaneously with a spatial GNN from scratch is incredibly unstable — the system has to learn both topological structure and chronological time flow concurrently. 
-
-To achieve state-of-the-art results, we implemented **Spatial Transfer Learning**. Before the Temporal GRU begins its training loop over the 50,000 sequence animations, we dynamically hook into the pre-trained `deadlock_rgcn_massive.pt` binary and **inject its static weight matrices** directly into the Temporal model's Spatial Encoder. 
-This means the Temporal network begins its life already possessing the structural geometrical intelligence of **200,000 massive static state analyses**, allowing it to dedicate its 128-dimensional Recurrent Memory Layer solely to modeling chronological OS trajectory. We effectively download a "Static Master's Degree" into the model's spatial encoder on Epoch 0. The final artifact (`deadlock_temporal_model.pt`) perfectly houses the mathematical synthesis of **250,000 total combined OS simulations** across distinct geometric tensor domains (`[Nodes, Edges]` vs `[Time, Nodes, Edges]`).
-
-### 3. Hybrid Ensemble (`deadlock_gnn/models/ensemble.py`)
-
-Before calling the GNN, the system runs a **classical Banker's Algorithm safety check**. If the state is provably safe, it outputs `SAFE` with high confidence immediately, skipping the neural path. If the classical algorithm is uncertain, it defers to the GNN. This hybrid approach is more trustworthy than pure ML.
-
-### 4. Monte Carlo Shapley Explainer (`deadlock_gnn/explain/shapley.py`)
-
-Implements **Monte Carlo approximation of Shapley Values** from cooperative game theory. For each node in the graph, it computes that node's marginal contribution to the deadlock prediction score across `T` random permutations. This provides rigorous, theoretically grounded explanations of *why* the model predicted a deadlock.
 
 ---
 
-## 📡 How Data Is Generated
+## 📦 Data Sources & Dataset Types
 
-### Why Synthetic Data?
+The project uses **three types of data**, each getting progressively more real:
 
-Real OS schedulers silently terminate deadlocked processes. This means real OS logs structurally **cannot** contain deadlock topology because the kernel destroys it before it can be logged. Every major academic paper on RAG-based ML (including work from MIT, CMU, and ETH Zurich) uses synthetic simulation for exactly this reason.
+### 1. Synthetic Static Dataset (`dataset/`)
 
-### The OS Simulation Engine (`dataset_generator/`)
+- **Count**: 200,000+ individual graph snapshots (`.pt` files)
+- **Generator**: `deadlock_gnn/data/generator.py` — Parameterized RAG generator
+- **How it's created**: Randomly places 4-12 processes and 3-10 resources with probabilistic request/assignment edges and controllable deadlock prevalence.
+- **Deadlock Label**: Ground-truth label is computed using the **Wait-For Graph (WFG)** algorithm with a DFS cycle detector (`deadlock_gnn/algorithms/wfg.py`).
+- **Balance**: ~50/50 deadlocked vs. safe graphs, achieved by rejection sampling during generation.
+- **Config reference**: `config.yaml` controls `target_per_class`, `max_capacity`, etc.
 
-The generator is not a naïve random graph producer — it is a **discrete-time OS simulator** that mechanically enforces real operating system constraints:
+### 2. Synthetic Temporal Dataset (`dataset_temporal/`)
 
-- **Poisson Process Arrivals**: New processes arrive according to `λ=0.4` rate parameter, matching realistic cloud workload burst distributions
-- **Resource Lifecycle**: Processes go through `ready → running → waiting → finished` state transitions
-- **FIFO Queue Blocking**: Processes that cannot acquire a resource join a waiting queue, exactly as Linux `wait_queue_head_t` works
-- **Hold Duration Cycles**: Processes hold acquired resources for `3–10 ticks` before releasing them, causing circular wait conditions to form organically
-- **Multi-Instance Resources**: Resources have capacity `1–5`, allowing multiple processes to hold the same resource simultaneously (matching mutexes with multiple permits)
-- **Burst Probability**: A 5% chance per tick of spawning a burst of up to 5 additional processes, simulating real-world traffic spikes
+- **Count**: 50,000 sequences of 8 time-ordered snapshots
+- **Generator**: `deadlock_gnn/data/temporal_generator.py` + `dataset_generator/`
+- **How it's created**: An OS simulator runs a Poisson-arrival process scheduler that models real OS behaviors:
+  - Process arrival/departure (Poisson with λ=0.4)
+  - Burst arrivals (5% probability, spawning up to 5 processes)
+  - Resource holding & release with configurable hold durations (3–10 ticks)
+  - Priority inversion toggling
+  - Configurable multi-capacity resources (up to 5 cores per resource)
+- **Format**: Each `.pt` file is a dict `{"graphs": [G_0...G_7], "label": tensor}` where `label` is whether `G_8` (the next step) is deadlocked.
+- **Sequence length**: 8 timesteps (configurable in `dataset_generator/config/config.yaml`)
 
-### Ground-Truth Labeling
+### 3. Real xv6-riscv Kernel Data (Live)
 
-After each simulation, the system extracts the OS state and runs **two independent classical OS algorithms** to determine the label:
+- **Source**: A real RISC-V OS kernel running inside QEMU emulator
+- **How it's captured**: Custom `[GNN_TRACE]` instrumentation in `xv6-riscv/kernel/spinlock.c` and `proc.c` emits structured log lines to QEMU's console:
+  ```
+  [GNN_TRACE] LOCK_ACQUIRE P5 Rproc 1642
+  [GNN_TRACE] LOCK_RELEASE P5 Rvirtio_disk 1645
+  [GNN_TRACE] PROCESS_CREATE P7 - 1650
+  [GNN_TRACE] PROCESS_EXIT P4 - 1658
+  ```
+- **Events tracked**: `LOCK_ACQUIRE`, `LOCK_RELEASE`, `PROCESS_CREATE`, `PROCESS_EXIT`, `PROCESS_SLEEP`, `PROCESS_WAKE`
+- **Bridge**: Logs stream through a UNIX FIFO pipe (`/tmp/xv6_gnn_pipe`) to a background Python listener that parses events and builds a live RAG.
 
-**Wait-For-Graph (WFG) DFS Cycle Detection**
-Converts the bipartite RAG (Process↔Resource graph) into a pure Process→Process WFG by collapsing resources, then runs directed DFS to detect cycles. A cycle = deadlock.
+---
 
-**Banker's Algorithm Safety Check**
-Checks whether there exists a safe execution sequence for all waiting processes given remaining resource capacities.
+## 🧪 Feature Engineering: The Resource Allocation Graph
 
-### Node Feature Vector (7 dimensions)
+Every OS state is converted into a **Relational Resource Allocation Graph** before being fed to the GNN.
+
+### Node Types
+
+| Type | Description | Color in Dashboard |
+|------|-------------|-------------------|
+| Process (P) | An OS process/thread | Blue |
+| Resource (R) | A hardware/software resource | Red |
+
+### Edge Types
+
+| Type | Direction | Meaning | Edge Type ID |
+|------|-----------|---------|-------------|
+| Request | P → R | Process is waiting/requesting this resource | 0 |
+| Assignment | R → P | Resource is currently held by this process | 1 |
+
+> **Deadlock Condition**: A deadlock exists when there is a **circular cycle** in the RAG. E.g., P1 → R1 → P2 → R2 → P1.
+
+### Node Feature Vector (7-dimensional)
+
+Each node carries a 7-dimensional feature vector:
 
 | Index | Feature | Description |
-|---|---|---|
-| 0 | `is_process` | Binary flag |
-| 1 | `is_resource` | Binary flag |
-| 2 | `norm_degree` | Normalized total degree |
-| 3 | `in_out_ratio` | in_deg / (out_deg + 1) |
-| 4 | `request_count` | Number of request edges |
-| 5 | `assignment_count` | Number of assignment edges |
-| 6 | `resource_utilization` | allocated / capacity |
-
-> **Note:** The `is_in_cycle` ground-truth feature was explicitly removed to eliminate data leakage. The model was forced to learn structural patterns, not read the answer directly.
+|-------|---------|-------------|
+| 0 | `is_process` | 1.0 if Process node, 0.0 if Resource |
+| 1 | `is_resource` | 0.0 if Process node, 1.0 if Resource |
+| 2 | `norm_degree` | Normalized total degree (in+out) |
+| 3 | `in_out_ratio` | in_degree / (out_degree + 1) |
+| 4 | `num_request` | Number of request edges incident to this node |
+| 5 | `num_assign` | Number of assignment edges incident to this node |
+| 6 | `util_ratio` | For resources: holders / capacity (utilization) |
 
 ---
 
-## 📁 Full Project Structure
+## 🧠 Models
 
+### Model 1: `DeadlockRGCN` — Static Snapshot GNN
+
+**File**: `deadlock_gnn/models/rgcn_model.py`  
+**Saved as**: `deadlock_rgcn_massive.pt` (trained on 200k graphs) or `deadlock_rgcn_best.pt`
+
+**Architecture**:
 ```
-DeadlockPredictionUsingGNN/
-│
-├── deadlock_gnn/                  ← Core GNN package
-│   ├── algorithms/
-│   │   ├── wfg.py                 ← Wait-For-Graph cycle detection
-│   │   └── bankers.py             ← Banker's Algorithm (safe state check)
-│   ├── data/
-│   │   ├── generator.py           ← Static RAG generator (heuristic, small runs)
-│   │   ├── converter.py           ← NetworkX → PyTorch Geometric converter
-│   │   └── temporal_generator.py  ← 🆕 Temporal sequence generator
-│   ├── models/
-│   │   ├── rgcn_model.py          ← Static RGCN model (3-layer)
-│   │   ├── sage_model.py          ← Original SAGEConv baseline
-│   │   ├── ensemble.py            ← Hybrid Banker's + GNN detector
-│   │   └── temporal_rgcn_gru.py   ← 🆕 Temporal RGCN + GRU model
-│   ├── explain/
-│   │   ├── shapley.py             ← Monte Carlo Shapley attribution
-│   │   └── subgraphx.py           ← GNNExplainer wrapper
-│   └── viz/
-│       └── rag_plot.py            ← 🆕 Shapley-colormap RAG visualizer
-│
-├── dataset_generator/             ← Production OS simulator
-│   ├── config/config.yaml         ← All simulation parameters
-│   ├── workload/workload_generator.py  ← Poisson arrival engine
-│   ├── process/
-│   │   ├── process.py             ← Process state machine
-│   │   └── process_engine.py      ← OS scheduler simulation
-│   ├── resources/
-│   │   ├── resource.py            ← Multi-instance resource
-│   │   └── resource_manager.py    ← Allocator + queue manager
-│   ├── rag/rag_builder.py         ← NetworkX RAG assembler
-│   ├── algorithms/
-│   │   ├── wait_for_graph.py      ← WFG (for generator labeling)
-│   │   └── bankers_algorithm.py   ← Banker's (for generator labeling)
-│   ├── converter/pyg_converter.py ← RAG → PyG tensor
-│   ├── dataset/dataset_writer.py  ← Disk-streaming .pt writer
-│   └── scripts/generate_dataset.py ← 🚀 Main generation entrypoint
-│
-├── tests/
-│   ├── test_wfg.py                ← Unit tests for WFG
-│   └── test_bankers.py            ← Unit tests for Banker's
-│
-├── train.py                       ← Static training (in-memory, small datasets)
-├── train_massive.py               ← Static training (disk-streaming, 200k+)
-├── train_temporal.py              ← 🆕 Temporal training (RGCN+GRU)
-├── evaluate.py                    ← Evaluation (original dataset)
-├── evaluate_massive.py            ← Evaluation (200k disk dataset)
-├── evaluate_temporal.py           ← 🆕 Evaluation (temporal sequence dataset)
-├── demo.py                        ← 🆕 Multi-Tab Streamlit UI with Shapley XAI
-│
-├── ── LEGACY / REFERENCE FILES ──
-├── deadlock_gnn.py                ← Original monolithic script (DO NOT use for training)
-├── config.yaml                    ← Legacy config (superseded by dataset_generator/config/)
-│
-├── deadlock_rgcn_best.pt          ← Model: trained on 3k in-memory graphs
-├── deadlock_rgcn_massive.pt       ← Model: trained on 200k disk graphs ✅ (primary)
-├── deadlock_temporal_model.pt     ← Model: temporal RGCN+GRU
-│
-└── README.md
+Input (7-dim node features)
+    ↓
+RGCNConv Layer 1 (7 → 64, 2 relation types) + ReLU
+    ↓
+RGCNConv Layer 2 (64 → 64) + ReLU
+    ↓
+RGCNConv Layer 3 (64 → 64)
+    ↓
+Global Add Pooling (graph-level embedding)
+    ↓
+Linear(64 → 32) + ReLU + Dropout(0.3)
+    ↓
+Linear(32 → 1) → BCEWithLogitsLoss → Sigmoid → Deadlock Probability
 ```
 
-> **Legacy files note:** `deadlock_gnn.py` was the original monolithic prototype. It is preserved for academic reference but has been replaced entirely by the modular `deadlock_gnn/` package. `config.yaml` at the root is similarly superseded by `dataset_generator/config/config.yaml`.
+**Key design choices**:
+- **RGCN** (Relational GCN) is used instead of plain GCN because we have **two different edge types** (Request vs. Assignment). Each relation type has its own weight matrix, letting the model learn differently from "P is waiting for R" vs. "R is held by P".
+- **Global Add Pooling** aggregates all node embeddings into a single graph-level vector before classification.
+- **Gradient Clipping** (max_norm=1.0) prevents exploding gradients during training.
+- **Warmup + Cosine LR Scheduler** provides stable training.
+- **BCEWithLogitsLoss with pos_weight** handles class imbalance.
+
+**Training**: `python train.py` or `python train_massive.py` (same model, 200k graphs)
 
 ---
 
-## ⚡ Exact Parameters Used
+### Model 2: `TemporalRGCNGRU` — Temporal Forecasting Model
 
-### Dataset Generation (Static)
-```yaml
-simulation:
-  steps: 50
-  poisson_lambda: 0.4
-  seed: 42
+**File**: `deadlock_gnn/models/temporal_rgcn_gru.py`  
+**Saved as**: `deadlock_temporal_model.pt`
 
-os_environment:
-  number_of_resources: 15
-  max_resource_capacity: 5
-  max_process_burst: 5
-  burst_probability: 0.05
-
-process_behavior:
-  min_requests_per_process: 2
-  max_requests_per_process: 6
-  hold_duration_min: 3
-  hold_duration_max: 10
-
-generator:
-  dataset_size: 200000
-  num_workers: 8
+**Architecture**:
+```
+Input: Sequence of 8 RAG snapshots [G_0, G_1, ..., G_7]
+    ↓ (for each timestep)
+Shared RGCN Encoder (same 3-layer RGCN as static model)
+    ↓
+Global Add Pooling → Graph Embedding Vector e_t (shape: [64])
+    ↓
+Stack all 8 embeddings: [B, T=8, H=64]
+    ↓
+2-layer GRU (hidden_size=128, batch_first=True)
+    ↓
+Last hidden state h_T (shape: [B, 128])
+    ↓
+Linear(128 → 64) + ReLU + Dropout(0.3)
+    ↓
+Linear(64 → 1) → Sigmoid → P(deadlock at T+1)
 ```
 
-### Static RGCN Training
-```
-Epochs          : 33 (early stop)
-Batch Size      : 128
-Learning Rate   : 0.005
-Hidden Channels : 64
-Dropout         : 0.3
-Optimizer       : Adam
-Loss            : BCEWithLogitsLoss
-Train/Val Split : 80/20
-```
-
-### Temporal Dataset Generation
-```yaml
-temporal:
-  sequence_length: 4       # G_t-3, G_t-2, G_t-1, G_t
-  dataset_size: 50000
-  snapshot_interval: 5     # ticks between snapshots
-  num_workers: 8
-```
-Result: **50,000 sequences** in **51.3 seconds** at **974 sequences/sec**. Deadlock rate: **42%** (balanced).
-
-### Temporal RGCN+GRU Training
-```
-Epochs          : 10
-Batch Size      : 32
-Learning Rate   : 3e-4 (with ReduceLROnPlateau)
-RGCN Hidden     : 64
-GRU Hidden      : 128
-GRU Layers      : 2
-Dropout         : 0.3
-Grad Clip       : 1.0
-```
+**Key design choices**:
+- **Transfer Learning**: The RGCN encoder weights are **directly copied** from the pretrained `deadlock_rgcn_massive.pt` (`load_static_weights()` method). This means the temporal model doesn't need to re-learn graph topology from scratch — it inherits the OS intuition from 200k+ graph training runs.
+- **2-layer GRU** processes the temporal sequence to learn OS state evolution patterns.
+- **Shared Encoder**: The same RGCN encoder processes all timesteps, which keeps the model efficient and forces it to learn a general graph embedding.
+- **Predicts T+1**: The model forecasts the *next* OS state, not the current one — this is true predictive capability.
 
 ---
 
-## 🛠 How to Run Everything
+### Model 3: XAI — Monte-Carlo Shapley Attribution
 
-### 1. Install Dependencies
+**File**: `deadlock_gnn/explain/shapley.py`
+
+When enabled in the UI, this computes **Shapley values** for each node in the graph using Monte-Carlo sampling. This tells you: "Which processes and resources contributed most to the predicted deadlock risk?"
+
+**How it works**: Randomly masks subsets of nodes and measures how much the prediction changes. Nodes that, when removed, drop the risk score the most, get the highest Shapley importance.
+
+---
+
+### Ensemble Detection (`deadlock_gnn/models/ensemble.py`)
+
+The `hybrid_detect()` function combines:
+1. **Structural check**: Direct WFG cycle detection (algorithmic, 100% accurate for known graphs)
+2. **GNN probability**: Neural network prediction
+
+If a cycle is detected structurally, it's always reported as `DEADLOCK`. The GNN probability provides a **confidence score** and can detect *near-deadlock* situations that the pure algorithm would miss.
+
+---
+
+## 🎛 Frontend: The Streamlit Dashboard
+
+**File**: `demo.py`  
+**Launch**: `streamlit run demo.py`
+
+The dashboard has **3 tabs**:
+
+### Tab 1: Static Snapshot & Shapley XAI
+
+**Inputs** (sidebar sliders):
+- **Processes**: Number of OS processes to simulate (2–20)
+- **Resources**: Number of shareable resources (2–15)
+- **Request Probability**: P(a process requests a resource edge)
+- **Assignment Probability**: P(a resource is assigned to a process)
+- **Show Shapley Importance**: Toggle XAI explanations
+- **Top-K Nodes**: How many nodes to highlight in XAI
+- **Monte Carlo Samples (T)**: Accuracy vs. speed tradeoff for Shapley
+
+**Outputs**:
+- Status badge: `⚠️ DEADLOCK DETECTED` or `✅ SAFE`
+- GNN Probability metric (% deadlock risk)
+- Detected cycle path (e.g., `P1 → R2 → P3 → R1 → P1`)
+- RAG visualization with color-coded nodes and highlighted deadlock cycle
+- Shapley importance bar chart (optional)
+
+### Tab 2: Temporal Sequence Animation
+
+**Inputs**:
+- **Time-Steps**: How many OS ticks to simulate (3–10)
+- **OS Ticks per Step**: Granularity of each snapshot
+
+**Outputs**:
+- `Predicted DEADLOCK Probability at T+1` (from the GRU model)
+- Warning/safe status for the next OS tick
+- A **timeline scrubber** to animate through the OS state evolution
+- RAG visualization for each time-step
+
+### Tab 3: Live xv6 Kernel Monitoring 🔴
+
+**Inputs**:
+- **xv6-riscv Path**: Directory path to the xv6-riscv repo
+- **Start/Stop Monitoring** button
+
+**What happens when you Start Monitoring**:
+1. Creates a UNIX FIFO pipe at `/tmp/xv6_gnn_pipe`
+2. Launches a new macOS Terminal window via AppleScript running `make qemu | tee /tmp/xv6_gnn_pipe`
+3. A background thread reads from the FIFO, parses every `[GNN_TRACE]` line, and updates the live RAG graph
+4. The dashboard auto-refreshes every second, running both models on the live graph
+5.  The live RAG is visualized in real-time
+
+**Outputs**:
+- `Static Deadlock Risk` — Instant RGCN prediction on current kernel state
+- `Temporal Forecast (T+1)` — GRU prediction of next tick (after 8 snapshots accumulate)
+- `🚨 HIGH DEADLOCK RISK` warning (if >70%)
+- Live RAG topology graph
+
+---
+
+## 📊 Metrics & Evaluation
+
+The models are evaluated using full classification metrics on a held-out test set:
+
+| Metric | Description |
+|--------|-------------|
+| **Accuracy** | Overall correct predictions |
+| **Precision** | Of all predicted deadlocks, how many were real |
+| **Recall** | Of all real deadlocks, how many we caught |
+| **F1 Score** | Harmonic mean of Precision and Recall (primary metric) |
+| **AUC-ROC** | Area under the ROC curve (discrimination power) |
+| **AUC-PR** | Area under Precision-Recall curve (better for imbalanced) |
+| **Inference Latency** | Wall-clock time for full test set evaluation |
+
+### Evaluation Plots Generated
+
+| File | Description |
+|------|-------------|
+| `roc_curve.png` | ROC curve for static RGCN model |
+| `pr_curve.png` | Precision-Recall curve for static RGCN model |
+| `roc_curve_massive.png` | ROC curve for massive RGCN model |
+| `pr_curve_massive.png` | PR curve for massive RGCN model |
+| `pr_curve_temporal.png` | PR curve for temporal GRU model |
+| `roc_curve_temporal.png` | ROC curve for temporal GRU model |
+| `training_dashboard.png` | Loss + Val F1 curves for static training |
+| `training_dashboard_massive.png` | training curves for massive model |
+| `training_dashboard_temporal.png` | Training curves for temporal model |
+| `confusion_matrix_temporal.png` | Confusion matrix for temporal model |
+
+---
+
+## ⚡ Step-by-Step Execution Commands
+
+> All commands should be run from the project root:
+> ```bash
+> cd "/Users/rishitkamboj/College/Operating systems /antigravity_monday"
+> ```
+> Activate the conda environment first:
+> ```bash
+> conda activate ./.conda
+> ```
+
+---
+
+### 🔧 0. Environment Setup
+
 ```bash
-pip install torch torch_geometric networkx scikit-learn streamlit matplotlib pyyaml
+# Install all dependencies
+pip install -r requirements.txt
+
+# requirements.txt includes:
+# torch, torch_geometric, streamlit, networkx, scikit-learn, matplotlib, pyyaml
 ```
 
-### 2. Generate the Static 200k Dataset
+---
+
+### 📊 1. Generate the Static Dataset (200k graphs)
+
 ```bash
+# Generate individual RAG snapshots into dataset/
 python dataset_generator/scripts/generate_dataset.py
-# Output: dataset/graph_000000.pt ... graph_199999.pt
+
+# OR generate inline (done automatically during training)
+# The train.py script generates data on-the-fly from config.yaml
 ```
 
-### 3. Train on the Massive Dataset
+---
+
+### 🔄 2. Generate the Temporal Dataset (50k sequences)
+
 ```bash
-python train_massive.py --dir dataset --epochs 5 --batch_size 128
-# Output: deadlock_rgcn_massive.pt, training_dashboard_massive.png
+# Generate temporal sequences into dataset_temporal/
+python deadlock_gnn/data/temporal_generator.py \
+    --dir dataset_temporal \
+    --seq_len 8 \
+    --n_sequences 50000
 ```
 
-### 4. Evaluate the Static Model
+---
+
+### 🧠 3. Train the Static RGCN Model (Fast, ~3k graphs)
+
 ```bash
+# Train the base RGCN model (uses config.yaml, ~1500 graphs per class)
+python train.py --config config.yaml
+
+# Outputs:
+#   deadlock_rgcn_best.pt     ← saved model checkpoint
+#   test_dataset.pt            ← test split for evaluation
+#   training_dashboard.png     ← loss + F1 curves
+```
+
+### 🧠 3b. Train the Massive Static RGCN Model (200k graphs)
+
+```bash
+# Train on 200,000 graphs (takes longer but much better generalization)
+python train_massive.py
+
+# Outputs:
+#   deadlock_rgcn_massive.pt   ← saved model checkpoint
+```
+
+---
+
+### ⏱ 4. Train the Temporal GRU Model
+
+```bash
+# Train the temporal forecasting model (requires dataset_temporal/ to be populated)
+python train_temporal.py \
+    --dir dataset_temporal \
+    --epochs 30 \
+    --batch_size 32 \
+    --lr 3e-4 \
+    --hidden 64 \
+    --gru_hidden 128
+
+# This automatically does transfer learning from deadlock_rgcn_massive.pt
+# Outputs:
+#   deadlock_temporal_model.pt        ← saved model checkpoint
+#   training_dashboard_temporal.png   ← loss + F1 curves
+```
+
+---
+
+### 📈 5. Evaluate the Static RGCN Model
+
+```bash
+# Evaluate the standard RGCN model
+python evaluate.py
+
+# Evaluate the massive RGCN model
 python evaluate_massive.py
-# Output: Accuracy, F1, AUC-ROC, Confusion Matrix, ROC+PR curve PNGs
+
+# Outputs:
+#   Accuracy, Precision, Recall, F1, AUC-ROC, AUC-PR
+#   roc_curve.png, pr_curve.png
 ```
 
-### 5. Generate Temporal Sequences
-```bash
-python deadlock_gnn/data/temporal_generator.py
-# Output: dataset_temporal/seq_000000.pt ... seq_049999.pt
-```
+### 📈 5b. Evaluate the Temporal Model
 
-### 6. Train the Temporal RGCN+GRU
-```bash
-python train_temporal.py --dir dataset_temporal --epochs 10 --batch_size 32
-# Output: deadlock_temporal_model.pt, training_dashboard_temporal.png
-```
-
-### 7. Evaluate the Temporal Model
 ```bash
 python evaluate_temporal.py
-# Output: Evaluates the sequence matrices producing 91.53% Accuracy F1, Confusion Matrix
+
+# Outputs:
+#   F1, AUC, Precision, Recall for temporal sequences
+#   roc_curve_temporal.png, pr_curve_temporal.png
+#   confusion_matrix_temporal.png
 ```
 
-### 8. Launch the Interactive Streamlit Demo
+---
+
+### 🖥 6. Launch the Streamlit Dashboard
+
 ```bash
+# Start the interactive demo
 streamlit run demo.py
-```
-In the UI:
-- **Tab 1: Static Snapshot & Shapley Analysis**: Generates OS snapshot and overlays XAI heatmap
-- **Tab 2: Temporal Sequence Animation**: Animates timeline frames running predictive GRU loop
-- Adjust parameters to manually scrub frames
 
-### 9. Run Unit Tests
+# Access at: http://localhost:8501
+# Or whichever port Streamlit picks (8502, 8503, etc. if occupied)
+```
+
+---
+
+### 🐧 7. Live xv6 Kernel Monitoring
+
 ```bash
-pytest tests/
+# Step 1: Start the Streamlit dashboard (if not already running)
+streamlit run demo.py
+
+# Step 2: In the browser, go to Tab 3 "Live xv6 Monitoring"
+
+# Step 3: Click "🚀 Start xv6 Monitoring"
+#   → A new macOS Terminal window opens automatically
+#   → xv6 builds and boots inside QEMU
+
+# Step 4: Try these stress commands in the xv6 terminal:
+stressfs       # Stress file system locks
+usertests      # Run all OS test suite (generates lots of lock events)
+
+# Step 5 (optional): To stress-test deadlock detection during normal OS use:
+#   Just observe the GNN monitoring the kernel! Every lock/unlock is tracked.
+
+# Step 6: Quit xv6 QEMU when done
+# Press: Ctrl+A, then X
 ```
 
 ---
 
-## 🔬 Research Context
+### 🔬 8. Run the Test Suite
 
-Standard OS deadlock detection is a solved problem algorithmically (WFG, Banker's). The research contribution here is:
+```bash
+# Run unit tests
+pytest tests/ -v
 
-1. **Scalability**: Classical algorithms run in O(V+E) per query. The RGCN learns a compressed latent representation that amortizes this cost over millions of training graphs.
-2. **Generalization**: A trained model can detect emergent deadlock *patterns* that no single classical algorithm was explicitly designed to recognize.
-3. **Temporal Forecasting**: No classical algorithm predicts *future* deadlocks from historical OS evolution. This is purely a machine learning contribution.
-4. **Explainability**: Pure classical algorithms tell you *if* a deadlock exists. Shapley attribution tells you *which process is most responsible* — critical for root cause analysis.
-
----
-
-## 📊 Results Summary
-
-```
-================================
-STATIC MODEL (200k Graphs)
-================================
-Accuracy  : 98.16%
-Precision : 97.93%
-Recall    : 97.62%
-F1 Score  : 97.77%
-AUC-ROC   : 0.9990
-Latency   : 0.0007s per graph
-
-Confusion Matrix (40,000 Test graphs):
-  TN: 23,083   FP: 342
-  FN: 395      TP: 16,180
-
-================================
-TEMPORAL SEQUENCE GRU (10k Sequences)
-================================
-Accuracy  : 91.53%
-Precision : 92.60%
-Recall    : 86.70%
-F1 Score  : 89.55%
-AUC-ROC   : 0.9667
-Latency   : 0.0028s per sequence
-
-Confusion Matrix (10,000 Test sequences):
-  TN: 5,523    FP: 290
-  FN: 557      TP: 3,630
+# Run specific test
+pytest tests/test_wfg.py -v
 ```
 
 ---
 
-*Built with PyTorch Geometric, NetworkX, Streamlit, and a lot of OS theory.*
+## 📁 Project File Structure
+
+```
+.
+├── demo.py                          # 🎛 Main Streamlit dashboard
+├── train.py                         # 🧠 Static RGCN training (fast, ~3k graphs)
+├── train_massive.py                 # 🧠 Static RGCN training (200k graphs)
+├── train_temporal.py                # ⏱  Temporal GRU training
+├── evaluate.py                      # 📈 Evaluate static RGCN
+├── evaluate_massive.py              # 📈 Evaluate massive RGCN
+├── evaluate_temporal.py             # 📈 Evaluate temporal model
+├── config.yaml                      # ⚙️  Training hyperparameters
+│
+├── deadlock_gnn/                    # 🧩 Core ML library
+│   ├── models/
+│   │   ├── rgcn_model.py            # DeadlockRGCN (static)
+│   │   ├── temporal_rgcn_gru.py     # TemporalRGCNGRU
+│   │   ├── sage_model.py            # DeadlockGNN (GraphSAGE variant)
+│   │   └── ensemble.py              # Hybrid detection (algo + GNN)
+│   ├── data/
+│   │   ├── generator.py             # RAG generator
+│   │   └── converter.py             # NetworkX → PyG Data
+│   ├── algorithms/
+│   │   └── wfg.py                   # Wait-For Graph + DFS cycle detector
+│   ├── explain/
+│   │   └── shapley.py               # Monte-Carlo Shapley XAI
+│   └── viz/
+│       └── rag_plot.py              # RAG visualization (matplotlib)
+│
+├── dataset_generator/               # 🏭 OS simulator for data generation
+│   ├── config/config.yaml           # Simulator config (Poisson λ, resources, etc.)
+│   ├── process/process_engine.py    # OS scheduler simulation
+│   ├── rag/rag_builder.py           # Build RAG from OS state
+│   └── converter/pyg_converter.py  # Convert to PyG format
+│
+├── runtime/                         # 🔴 Live xv6 monitoring
+│   ├── runtime_inference.py         # Live inference engine (RGCN + GRU)
+│   └── xv6_bridge/
+│       ├── xv6_stream_listener.py   # FIFO pipe listener + Terminal launcher
+│       ├── event_parser.py          # Parse [GNN_TRACE] log lines
+│       └── rag_builder.py           # Incremental RAG from events
+│
+├── xv6-riscv/                       # 🐧 Instrumented kernel (git submodule)
+│   ├── kernel/spinlock.c            # LOCK_ACQUIRE/RELEASE instrumentation
+│   ├── kernel/proc.c                # PROCESS_CREATE/EXIT/SLEEP/WAKE instrumentation
+│   └── ...
+│
+├── dataset/                         # 💾 200k+ static graph .pt files
+├── dataset_temporal/                # 💾 50k temporal sequence .pt files
+│   
+├── deadlock_rgcn_best.pt            # 🏆 Saved static model (fast training)
+├── deadlock_rgcn_massive.pt         # 🏆 Saved static model (200k training)
+├── deadlock_temporal_model.pt       # 🏆 Saved temporal model
+└── test_dataset.pt                  # 🧪 Test set (from training split)
+```
+
+---
+
+## 🔑 Key Technical Highlights
+
+1. **Real OS Kernel Integration**: The GNN reads from a real kernel — not a simulation — using instrumented spinlocks in xv6-riscv.
+
+2. **Cross-Domain Transfer Learning**: The temporal model directly inherits RGCN weights trained on 200k synthetic graphs, avoiding the need to retrain the spatial encoder. This is the same approach as using a pretrained ImageNet model as a backbone for a new vision task.
+
+3. **Relational GNN**: Regular GNNs treat all edges equally. RGCN (Relational Graph Convolutional Network) uses different weight matrices per edge type, correctly modeling the asymmetric semantics of "waiting for" vs. "holding" in a deadlock scenario.
+
+4. **Wait-For Graph (WFG) Algorithm**: The ground-truth labels are computed using a classical OS algorithm. The GNN learns to replicate (and extend) this algorithm through graph structure learning alone.
+
+5. **Shapley XAI**: Post-hoc explainability shows *which processes and resources* are contributing to the predicted deadlock score — not just that one was predicted.
+
+---
+
+*Built for the Operating Systems course — demonstrating that modern AI can augment classical OS theory.*
