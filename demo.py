@@ -11,7 +11,11 @@ from deadlock_gnn.models.rgcn_model import DeadlockRGCN
 @st.cache_resource
 def load_model():
     device = torch.device("cpu")
-    model_path = "deadlock_rgcn_best.pt"
+    if os.path.exists("deadlock_rgcn_massive.pt"):
+        model_path = "deadlock_rgcn_massive.pt"
+    else:
+        model_path = "deadlock_rgcn_best.pt"
+        
     if not os.path.exists(model_path):
         return None
         
