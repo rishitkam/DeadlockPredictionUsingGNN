@@ -7,6 +7,7 @@ from torch_geometric.loader import DataLoader
 from deadlock_gnn.models.rgcn_model import DeadlockRGCN
 import time
 import argparse
+import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
 class DiskRAGDataset(torch.utils.data.Dataset):
@@ -56,6 +57,9 @@ def main():
     best_f1 = 0
     t_start = time.time()
     
+    losses = []
+    val_f1s = []
+    
     for epoch in range(1, args.epochs + 1):
         model.train()
         total_loss = 0
@@ -90,9 +94,27 @@ def main():
             best_f1 = f1
             torch.save({"model_state": model.state_dict()}, "deadlock_rgcn_massive.pt")
             
+        losses.append(avg_loss)
+        val_f1s.append(f1)
+            
     print(f"\nTraining completed in {time.time() - t_start:.2f}s")
     print("Best F1 on new massive dataset:", best_f1)
     print("Model perfectly saved to 'deadlock_rgcn_massive.pt'")
+    
+    plt.figure(figsize=(10, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(range(1, args.epochs + 1), losses, label='Train Loss')
+    plt.title('Training Loss (Massive)')
+    plt.xlabel('Epochs')
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(range(1, args.epochs + 1), val_f1s, label='Val F1', color='green')
+    plt.title('Validation F1 (Massive)')
+    plt.xlabel('Epochs')
+    
+    plt.tight_layout()
+    plt.savefig('training_dashboard_massive.png')
+    print("Saved massive dashboard to training_dashboard_massive.png")
 
 if __name__ == "__main__":
     main()
