@@ -2,20 +2,26 @@ import streamlit as st
 import networkx as nx
 import torch
 import os
+import yaml
 import numpy as np
 
 from deadlock_gnn.data.generator import generate_rag
 from deadlock_gnn.models.ensemble import hybrid_detect
 from deadlock_gnn.viz.rag_plot import visualise_rag
 from deadlock_gnn.models.rgcn_model import DeadlockRGCN
+from deadlock_gnn.models.temporal_rgcn_gru import TemporalRGCNGRU
 from deadlock_gnn.explain.shapley import shapley_attribution
 from deadlock_gnn.data.converter import convert_to_pyg_data
 
-st.set_page_config(page_title="DeadlockGNN Demo", layout="wide")
+from dataset_generator.process.process_engine import OSEngine
+from dataset_generator.rag.rag_builder import RAGBuilder
+from dataset_generator.converter.pyg_converter import PyGConverter
 
-# ── Model Loader ──────────────────────────────────────────────────────────────
+st.set_page_config(page_title="DeadlockGNN Demo", layout="wide", page_icon="🔒")
+
+# ── Model Loaders ─────────────────────────────────────────────────────────────
 @st.cache_resource
-def load_model():
+def load_static_model():
     device = torch.device("cpu")
     if os.path.exists("deadlock_rgcn_massive.pt"):
         model_path = "deadlock_rgcn_massive.pt"
@@ -32,133 +38,169 @@ def load_model():
 
     model = DeadlockRGCN(in_channels=7, hidden_channels=hidden,
                           num_relations=2, dropout=dropout)
-    model.load_state_dict(ckpt["model_state"])
+    model.load_state_dict(ckpt["model_state"] if "model_state" in ckpt else ckpt)
     model.eval()
     return model
 
+@st.cache_resource
+def load_temporal_model():
+    device = torch.device("cpu")
+    model_path = "deadlock_temporal_model.pt"
+    if not os.path.exists(model_path):
+        return None
+        
+    ckpt = torch.load(model_path, map_location=device, weights_only=False)
+    config = ckpt.get("config", {})
+    hidden = config.get("hidden", 64)
+    gru_hidden = config.get("gru_hidden", 128)
+    
+    model = TemporalRGCNGRU(in_channels=7, hidden_channels=hidden,
+                            gru_hidden=gru_hidden, num_gru_layers=2, dropout=0.3)
+    model.load_state_dict(ckpt["model_state"] if "model_state" in ckpt else ckpt)
+    model.eval()
+    return model
 
-# ── Page Title ────────────────────────────────────────────────────────────────
-st.title("🔒 DeadlockGNN — Interactive OS Deadlock Predictor")
-st.markdown(
-    "Generate **Resource Allocation Graph (RAG)** snapshots from a simulated OS environment "
-    "and run our **RGCN + Hybrid Ensemble** predictor. Toggle the **XAI Explanation** to see "
-    "which nodes are driving the deadlock prediction via Monte Carlo Shapley Values."
-)
+# ── Title ──────────────────────────────────────────────────────────────────
+st.title("🔒 DeadlockGNN — Advanced OS Predictor")
+st.markdown("Explore both **Static Explanatory** predictions and **Continual Temporal Sequence** predictions using our hybrid RGCN and GRU recurrent models.")
 
-model = load_model()
+static_model = load_static_model()
+temporal_model = load_temporal_model()
 
-# ── Sidebar Controls ─────────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("⚙️ Graph Parameters")
-    num_procs  = st.slider("Processes",             2, 20, 6)
-    num_res    = st.slider("Resources",             2, 15, 4)
-    p_req      = st.slider("Request Probability",   0.0, 1.0, 0.3)
-    p_assign   = st.slider("Assignment Probability",0.0, 1.0, 0.3)
+# ── Tabs ──────────────────────────────────────────────────────────────────
+tab1, tab2 = st.tabs(["📊 Static Snapshot & Shapley XAI", "⏱️ Temporal Sequence Animation"])
 
-    st.markdown("---")
-    st.header("🔍 XAI Explanation")
-    show_xai   = st.checkbox("Show Shapley Importance", value=False)
-    top_k      = st.slider("Top-K Explanation Nodes", 1, 10, 3,
-                            disabled=not show_xai)
-    n_mc       = st.slider("Monte Carlo Samples (T)", 10, 100, 30,
-                            help="Higher T = more accurate but slower",
-                            disabled=not show_xai)
+# ==============================================================================
+# TAB 1: STATIC SNAPSHOT & XAI
+# ==============================================================================
+with tab1:
+    col_s1, col_s2 = st.columns([1, 2.5])
+    
+    with col_s1:
+        st.header("⚙️ Graph Parameters")
+        num_procs  = st.slider("Processes", 2, 20, 6, key="sp1")
+        num_res    = st.slider("Resources", 2, 15, 4, key="sr1")
+        p_req      = st.slider("Request Probability", 0.0, 1.0, 0.3, key="sp_req")
+        p_assign   = st.slider("Assignment Probability", 0.0, 1.0, 0.3, key="sp_ass")
 
-    generate   = st.button("🎲 Generate RAG", use_container_width=True)
+        st.markdown("---")
+        st.header("🔍 XAI Explanation")
+        show_xai   = st.checkbox("Show Shapley Importance", value=False, key="s_xai")
+        top_k      = st.slider("Top-K Explanation Nodes", 1, 10, 3, disabled=not show_xai, key="sk")
+        n_mc       = st.slider("Monte Carlo Samples (T)", 10, 100, 30, disabled=not show_xai, key="smc")
 
-# ── Generate ──────────────────────────────────────────────────────────────────
-if generate:
-    G = generate_rag(num_procs, num_res, p_req, p_assign)
-    st.session_state["G"] = G
-    # Clear cached explanation when a new graph is generated
-    st.session_state.pop("shapley_scores", None)
+        generate_static = st.button("🎲 Generate Static RAG", use_container_width=True)
 
-# ── Main Panel ────────────────────────────────────────────────────────────────
-if "G" in st.session_state:
-    G = st.session_state["G"]
+    if generate_static:
+        st.session_state["static_G"] = generate_rag(num_procs, num_res, p_req, p_assign)
+        st.session_state.pop("shapley_scores", None)
 
-    col_left, col_right = st.columns([1, 1])
-
-    # ── Detection results ──────────────────────────────────────────────────
-    with col_left:
-        st.subheader("🧠 Hybrid Detection")
-        if model is None:
-            st.error("No trained model found. Run `train.py` or `train_massive.py` first.")
-            status, conf, cycle, prob = "UNKNOWN", "N/A", [], 0.0
-        else:
-            status, conf, cycle, prob = hybrid_detect(G, model, is_rgcn=True)
-
-            if status == "DEADLOCK":
-                st.error(f"**⚠️ DEADLOCK DETECTED** — Confidence: {conf}")
-            elif status == "SAFE":
-                st.success(f"**✅ SAFE STATE** — Confidence: {conf}")
+    if "static_G" in st.session_state:
+        G = st.session_state["static_G"]
+        
+        with col_s2:
+            st.subheader("🧠 Hybrid Static Detection")
+            if static_model is None:
+                st.error("Static model missing.")
             else:
-                st.warning(f"**🔶 UNCERTAIN** — Confidence: {conf}")
+                status, conf, cycle, prob = hybrid_detect(G, static_model, is_rgcn=True)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if status == "DEADLOCK":
+                        st.error(f"**⚠️ DEADLOCK DETECTED** ({conf})")
+                    else:
+                        st.success(f"**✅ SAFE** ({conf})")
+                        
+                    if cycle:
+                        st.info(f"🔄 Cycle: {', '.join(cycle)}")
+                with c2:
+                    st.metric("GNN Probability", f"{prob * 100:.1f}%")
 
-            st.metric("GNN Deadlock Probability", f"{prob * 100:.1f}%")
-
-            if cycle:
-                st.info(f"🔄 Cycle Nodes: {', '.join(cycle)}")
-
-    # ── Shapley Explanation ────────────────────────────────────────────────
-    node_importance = None
-    shapley_map = {}
-
-    if show_xai and model is not None:
-        with col_right:
-            st.subheader("🎯 Shapley Node Explanation")
-
-            if "shapley_scores" not in st.session_state:
-                with st.spinner(f"Computing Shapley values (T={n_mc})…"):
-                    try:
+            node_importance, shapley_map = None, {}
+            if show_xai and static_model is not None:
+                st.markdown("---")
+                st.subheader("🎯 Shapley Attribution")
+                if "shapley_scores" not in st.session_state:
+                    with st.spinner("Computing Shapley values..."):
                         pyg_data = convert_to_pyg_data(G, label=0)
-                        phi = shapley_attribution(model, pyg_data,
-                                                  is_rgcn=True, T=n_mc)
-                        st.session_state["shapley_scores"] = phi
-                    except Exception as e:
-                        st.error(f"Shapley error: {e}")
-                        phi = None
-            else:
+                        st.session_state["shapley_scores"] = shapley_attribution(static_model, pyg_data, is_rgcn=True, T=n_mc)
                 phi = st.session_state["shapley_scores"]
-
-            if phi is not None:
-                nodes = list(G.nodes())
-
-                # Normalise scores to [0, 1]
+                
                 phi_np = phi.numpy()
-                phi_min, phi_max = phi_np.min(), phi_np.max()
-                rng = phi_max - phi_min if phi_max != phi_min else 1.0
-                phi_norm = (phi_np - phi_min) / rng
-
-                shapley_map = {nodes[i]: float(phi_norm[i]) for i in range(len(nodes))}
-                node_importance = shapley_map
-
-                # Top-K table
+                phi_norm = (phi_np - phi_np.min()) / (phi_np.max() - phi_np.min() + 1e-9)
+                shapley_map = {list(G.nodes())[i]: float(phi_norm[i]) for i in range(len(G))}
+                
                 sorted_nodes = sorted(shapley_map, key=shapley_map.get, reverse=True)[:top_k]
-                st.markdown(f"**Top {top_k} most influential nodes:**")
-                rows = []
-                for rank, n in enumerate(sorted_nodes, 1):
-                    score = shapley_map[n]
-                    bar = "█" * int(score * 20)
-                    rows.append({"Rank": rank, "Node": n, "Score": f"{score:.4f}",
-                                 "Influence": bar})
-                st.table(rows)
+                cols = st.columns(top_k)
+                for idx, n in enumerate(sorted_nodes):
+                    cols[idx].metric(f"Rank {idx+1}: {n}", f"{shapley_map[n]:.3f}")
 
-    # ── Graph Visualisation ────────────────────────────────────────────────
-    st.subheader("📊 Resource Allocation Graph")
-    legend_items = "⚪ Circle = Process   🔴 Square = Resource   "
-    if show_xai:
-        legend_items += "🔵 Low importance → 🟠 Medium → 🔴 High"
-    st.caption(legend_items)
+            st.markdown("---")
+            st.subheader("📊 Static Visualizer")
+            fig = visualise_rag(G, highlight_nodes=cycle if cycle else [],
+                                node_importance=shapley_map if shapley_map else None,
+                                show_explanation=show_xai)
+            st.pyplot(fig, use_container_width=True)
 
-    fig = visualise_rag(
-        G,
-        title="Deadlock Prediction Explanation" if show_xai else "Resource Allocation Graph",
-        highlight_nodes=cycle if cycle else [],
-        node_importance=shapley_map if shapley_map else None,
-        show_explanation=show_xai,
-    )
-    st.pyplot(fig, use_container_width=True)
-
-else:
-    st.info("👈 Adjust parameters in the sidebar and click **Generate RAG** to begin.")
+# ==============================================================================
+# TAB 2: TEMPORAL SEQUENCE ANIMATION
+# ==============================================================================
+with tab2:
+    t_col1, t_col2 = st.columns([1, 2.5])
+    
+    with t_col1:
+        st.header("⏱️ Sequence Generation")
+        seq_len = st.slider("Time-Steps to Simulate", 3, 6, 4)
+        interval = st.slider("OS Ticks per Step", 1, 10, 5)
+        
+        generate_temporal = st.button("🌌 Simulate Flow of Time", use_container_width=True)
+        
+    if generate_temporal:
+        with st.spinner("Running core OS Scheduler..."):
+            try:
+                # Load structural environment
+                config = yaml.safe_load(open("dataset_generator/config/config.yaml"))
+                engine = OSEngine(config)
+                
+                # Warmup
+                for _ in range(20): engine.step()
+                
+                rag_seq = []
+                pyg_seq = []
+                
+                for _ in range(seq_len):
+                    for _ in range(interval): engine.step()
+                    nodes, edges = engine.get_system_state()
+                    rag = RAGBuilder.build_from_state(nodes, edges)
+                    pyg = PyGConverter.convert(rag)
+                    rag_seq.append(rag)
+                    pyg_seq.append(pyg)
+                    
+                st.session_state["rag_seq"] = rag_seq
+                st.session_state["pyg_seq"] = pyg_seq
+            except Exception as e:
+                st.error(f"Simulation crashed due to unstable OS variables: {e}. Try generating again.")
+                
+    if "rag_seq" in st.session_state:
+        with t_col2:
+            st.subheader("🔮 Predictive Time-Series (RGCN + GRU)")
+            if temporal_model is None:
+                st.warning("⚠️ No Temporal Model found! Make sure you run `python train_temporal.py`")
+            else:
+                with torch.no_grad():
+                    # Batch the sequence [G0, G1...] via a single batch element
+                    out = temporal_model(st.session_state["pyg_seq"])
+                    prob = torch.sigmoid(out).item()
+                    
+                st.metric("Predicted DEADLOCK Probability at T+1", f"{prob * 100:.2f}%")
+                if prob > 0.6:
+                    st.error("🚨 Recurrent Network foresees an imminent systemic crash in the next tick!")
+                else:
+                    st.success("✅ OS trajectory looks stable into the future.")
+                    
+            st.markdown("---")
+            view_step = st.slider("Scrub Timeline", 1, seq_len, 1, format="Timestep T-%d" if seq_len else "Timestep %d")
+            
+            st.markdown(f"### Visualizing OS State at `T - {seq_len - view_step}`")
+            fig_t = visualise_rag(st.session_state["rag_seq"][view_step - 1], title=f"OS Snapshot {view_step}/{seq_len}")
+            st.pyplot(fig_t, use_container_width=True)
