@@ -1,0 +1,6 @@
+[server]
+# Disable the file watcher to prevent it from crashing when scanning PyTorch internals on macOS
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false

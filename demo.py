@@ -16,6 +16,7 @@ from deadlock_gnn.data.converter import convert_to_pyg_data
 from dataset_generator.process.process_engine import OSEngine
 from dataset_generator.rag.rag_builder import RAGBuilder
 from dataset_generator.converter.pyg_converter import PyGConverter
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 # Runtime xv6 Imports
 from runtime.xv6_bridge.xv6_stream_listener import XV6StreamListener
@@ -248,6 +249,9 @@ with tab3:
 
                     listener = XV6StreamListener(xv6_dir, callback=on_update)
                     listener.start()
+                    # Attach context to the background thread
+                    if hasattr(listener, 'thread'):
+                        add_script_run_ctx(listener.thread)
                     st.session_state["xv6_monitor"] = listener
                     st.session_state["monitor_active"] = True
                     st.rerun()

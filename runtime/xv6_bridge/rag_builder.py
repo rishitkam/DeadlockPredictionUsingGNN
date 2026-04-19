@@ -22,6 +22,10 @@ class XV6RAGBuilder:
             
         elif etype == "PROCESS_EXIT":
             if pid in self.graph:
+                # Defensive: Remove all edges connected to this process before removing node
+                edges_to_remove = list(self.graph.edges(pid)) + list(self.graph.in_edges(pid))
+                for u, v in edges_to_remove:
+                    self.graph.remove_edge(u, v)
                 self.graph.remove_node(pid)
                 
         elif etype == "LOCK_ACQUIRE":
@@ -29,13 +33,16 @@ class XV6RAGBuilder:
             self._ensure_nodes(pid, res)
             # A lock acquisition implies the assignment edge: Resource -> Process
             self.graph.add_edge(res, pid, type="assignment")
-            # If there was a request edge, remove it (assuming process now has it)
+            # Clear any pending request edges for this process/resource pair
             if self.graph.has_edge(pid, res):
                 self.graph.remove_edge(pid, res)
                 
         elif etype == "LOCK_RELEASE":
+            # Defensive: Remove any relationship between this process and resource
             if self.graph.has_edge(res, pid):
                 self.graph.remove_edge(res, pid)
+            if self.graph.has_edge(pid, res):
+                self.graph.remove_edge(pid, res)
                 
         elif etype == "PROCESS_SLEEP":
             self._ensure_nodes(pid, res)

@@ -2,66 +2,95 @@
 import subprocess
 import threading
 import time
+import os
+import sys
 from .event_parser import XV6EventParser
 from .rag_builder import XV6RAGBuilder
 
 class XV6StreamListener:
     """
-    Spawns xv6 via QEMU and listens to its stdout stream.
-    Updates a live RAG model in real-time.
+    Launches xv6 in a DEDICATED macOS Terminal window and listens to its output
+    via a UNIX FIFO (Named Pipe) for real-time neural processing.
     """
     def __init__(self, xv6_dir: str, callback=None):
-        self.xv6_dir = xv6_dir
+        self.xv6_dir = os.path.abspath(xv6_dir)
         self.callback = callback
         self.parser = XV6EventParser()
         self.builder = XV6RAGBuilder()
         self.running = False
-        self.process = None
+        
+        # FIFO Configuration
+        self.fifo_path = "/tmp/xv6_gnn_pipe"
+        self.cleanup_pipe()
+
+    def cleanup_pipe(self):
+        if os.path.exists(self.fifo_path):
+            try:
+                os.remove(self.fifo_path)
+            except:
+                pass
 
     def start(self):
-        """Starts the QEMU process and the listener thread."""
+        """Starts the dedicated window and the listener thread."""
         self.running = True
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        
+        # Create FIFO
+        try:
+            os.mkfifo(self.fifo_path)
+        except OSError as e:
+            print(f"Error creating FIFO: {e}")
+            return
+
+        # Start background reader thread
+        self.thread = threading.Thread(target=self._run_reader, daemon=True)
         self.thread.start()
 
-    def _run(self):
-        # make qemu-nox (no graphic window) is usually better for console scraping
-        cmd = ["make", "qemu-nox"]
+        # Launch dedicated terminal via AppleScript
+        self._launch_terminal()
+
+    def _launch_terminal(self):
+        # Command to run in the new window
+        # 1. cd to xv6 dir
+        # 2. Set title
+        # 3. run make qemu and pipe output to FIFO using tee (to keep console interactive)
+        inner_cmd = f"cd \\\"{self.xv6_dir}\\\"; clear; printf \\\"\\\\033]0;xv6 GNN Monitor\\\\007\\\"; make qemu | tee {self.fifo_path}"
+        
+        applescript = f'tell application "Terminal" to do script "{inner_cmd}" activate'
+        subprocess.run(["osascript", "-e", applescript])
+
+    def _run_reader(self):
+        """Reads from the FIFO and updates the RAG."""
         try:
-            self.process = subprocess.Popen(
-                cmd,
-                cwd=self.xv6_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            
-            for line in self.process.stdout:
-                if not self.running:
-                    break
-                
-                event = self.parser.parse_line(line)
-                if event:
-                    self.builder.update(event)
-                    if self.callback:
-                        self.callback(self.builder.get_graph(), event)
-                
-                # Optional: log line for debugging if it starts with [GNN_TRACE]
-                if "[GNN_TRACE]" in line:
-                    with open("xv6_bridge_debug.log", "a") as f:
-                        f.write(line)
+            # Note: opening a FIFO for reading blocks until a writer opens it
+            with open(self.fifo_path, 'r') as fifo:
+                while self.running:
+                    line = fifo.readline()
+                    if not line:
+                        # EOF - pipe closed
+                        time.sleep(0.1)
+                        continue
+                    
+                    event = self.parser.parse_line(line)
+                    if event:
+                        self.builder.update(event)
+                        if self.callback:
+                            self.callback(self.builder.get_graph(), event)
+                    
+                    # Debug log
+                    if "[GNN_TRACE]" in line:
+                        with open("xv6_bridge_debug.log", "a") as f:
+                            f.write(line)
 
         except Exception as e:
-            print(f"Error running xv6: {e}")
+            print(f"FIFO Reader Error: {e}")
         finally:
             self.stop()
 
     def stop(self):
         self.running = False
-        if self.process:
-            self.process.terminate()
-            self.process = None
+        # We don't terminate the terminal window (user might want to keep playing),
+        # but the AI stops listening.
+        self.cleanup_pipe()
 
     def get_current_graph(self):
         return self.builder.get_graph()
