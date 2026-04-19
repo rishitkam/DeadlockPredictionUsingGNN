@@ -23,3 +23,11 @@ generator:
   dataset_size: 200000            # Total graphs to generate
   output_dir: "dataset"
   num_workers: 8                # Multiprocessing pool size
+
+temporal:
+  enabled: true
+  sequence_length: 4            # Number of timesteps per sample (G_t-3...G_t)
+  dataset_size: 50000           # Total sequences to generate
+  output_dir: "dataset_temporal"
+  snapshot_interval: 5          # Take a RAG snapshot every N ticks
+  num_workers: 8
