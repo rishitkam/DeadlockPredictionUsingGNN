@@ -19,7 +19,8 @@ The system spans three major capabilities that together form a coherent OS resea
 
 > 1. **Static Deadlock Detection** using RGCN on Resource Allocation Graph snapshots  
 > 2. **Temporal Deadlock Forecasting** using RGCN + GRU on evolving RAG sequences  
-> 3. **Explainable AI Visualizations** using Monte Carlo Shapley Node Attribution inside a live Streamlit demo  
+> 3. **Explainable AI Visualizations** using Monte Carlo Shapley Node Attribution  
+> 4. **🚀 Live Kernel Monitoring** via real-time xv6-riscv instrumentation and neural stream processing  
 
 ---
 

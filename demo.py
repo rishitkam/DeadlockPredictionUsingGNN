@@ -17,6 +17,10 @@ from dataset_generator.process.process_engine import OSEngine
 from dataset_generator.rag.rag_builder import RAGBuilder
 from dataset_generator.converter.pyg_converter import PyGConverter
 
+# Runtime xv6 Imports
+from runtime.xv6_bridge.xv6_stream_listener import XV6StreamListener
+from runtime.runtime_inference import LiveDeadlockInference
+
 st.set_page_config(page_title="DeadlockGNN Demo", layout="wide", page_icon="🔒")
 
 # ── Model Loaders ─────────────────────────────────────────────────────────────
@@ -68,7 +72,7 @@ static_model = load_static_model()
 temporal_model = load_temporal_model()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
-tab1, tab2 = st.tabs(["📊 Static Snapshot & Shapley XAI", "⏱️ Temporal Sequence Animation"])
+tab1, tab2, tab3 = st.tabs(["📊 Static Snapshot & Shapley XAI", "⏱️ Temporal Sequence Animation", "🐧 Live xv6 Monitoring"])
 
 # ==============================================================================
 # TAB 1: STATIC SNAPSHOT & XAI
@@ -204,3 +208,86 @@ with tab2:
             st.markdown(f"### Visualizing OS State at `T - {seq_len - view_step}`")
             fig_t = visualise_rag(st.session_state["rag_seq"][view_step - 1], title=f"OS Snapshot {view_step}/{seq_len}")
             st.pyplot(fig_t, use_container_width=True)
+# ==============================================================================
+# TAB 3: LIVE XV6 MONITORING
+# ==============================================================================
+with tab3:
+    st.header("⚡ Live Operating System Intrusion")
+    st.markdown("""
+    This tab connects directly to a running **xv6-riscv kernel**. 
+    It intercepts kernel-level events (locks, scheduling) via QEMU console instrumentation 
+    to reconstruct the RAG in real-time and run neural inference.
+    """)
+
+    col_l1, col_l2 = st.columns([1, 2.5])
+
+    with col_l1:
+        st.subheader("📡 Connection Control")
+        
+        if "xv6_monitor" not in st.session_state:
+            st.session_state["xv6_monitor"] = None
+            st.session_state["xv6_inference"] = LiveDeadlockInference()
+            st.session_state["last_graph"] = None
+            st.session_state["monitor_active"] = False
+
+        xv6_dir = st.text_input("xv6-riscv Path", value="./xv6-riscv")
+        
+        btn_label = "🛑 Stop Monitoring" if st.session_state["monitor_active"] else "🚀 Start xv6 Monitoring"
+        if st.button(btn_label, type="primary", use_container_width=True):
+            if st.session_state["monitor_active"]:
+                if st.session_state["xv6_monitor"]:
+                    st.session_state["xv6_monitor"].stop()
+                st.session_state["monitor_active"] = False
+                st.session_state["xv6_monitor"] = None
+            else:
+                try:
+                    def on_update(G, event):
+                        # This runs in background thread
+                        st.session_state["last_graph"] = G.copy()
+                        st.session_state["last_event"] = event
+
+                    listener = XV6StreamListener(xv6_dir, callback=on_update)
+                    listener.start()
+                    st.session_state["xv6_monitor"] = listener
+                    st.session_state["monitor_active"] = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to start xv6: {e}")
+
+        if st.session_state["monitor_active"]:
+            st.success("Monitoring system attached to QEMU stream.")
+            if st.button("🔄 Force UI Refresh"):
+                st.rerun()
+        else:
+            st.info("Monitor is currently idle.")
+
+    with col_l2:
+        if st.session_state["monitor_active"] and st.session_state["last_graph"]:
+            G = st.session_state["last_graph"]
+            
+            # Run Inference
+            static_p, temp_p = st.session_state["xv6_inference"].process_new_graph(G)
+            
+            st.subheader("🧠 Live Neural Predictions")
+            m1, m2 = st.columns(2)
+            m1.metric("Static Deadlock Risk", f"{static_p * 100:.1f}%")
+            if temp_p is not None:
+                m2.metric("Temporal Forecast (T+1)", f"{temp_p * 100:.1f}%")
+            else:
+                m2.metric("Temporal Forecast", "Warming up...")
+
+            if static_p > 0.7 or (temp_p and temp_p > 0.7):
+                st.warning("🚨 HIGH DEADLOCK RISK: Structural anomaly detected in kernel state!")
+
+            st.markdown("---")
+            st.subheader("🗺️ Live RAG Topology")
+            # Using basic visualize for speed in live mode
+            fig_live = visualise_rag(G, title=f"xv6 Live State (Nodes: {len(G.nodes)})")
+            st.pyplot(fig_live, use_container_width=True)
+            
+            # Simple loop to encourage UI refresh
+            import time
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.info("Start the monitor to visualize live xv6 states.")
