@@ -85,6 +85,12 @@ For each timestep t in [t-3, t-2, t-1, t]:
 Output: P(deadlock at t+1) ∈ [0, 1]
 ```
 
+#### 🧬 Cross-Domain Transfer Learning (The "Simulation Fusion" Architecture)
+A major bottleneck in Temporal Graph Networks is that training a GRU simultaneously with a spatial GNN from scratch is incredibly unstable — the system has to learn both topological structure and chronological time flow concurrently. 
+
+To achieve state-of-the-art results, we implemented **Spatial Transfer Learning**. Before the Temporal GRU begins its training loop over the 50,000 sequence animations, we dynamically hook into the pre-trained `deadlock_rgcn_massive.pt` binary and **inject its static weight matrices** directly into the Temporal model's Spatial Encoder. 
+This means the Temporal network begins its life already possessing the structural geometrical intelligence of **200,000 massive static state analyses**, allowing it to dedicate its 128-dimensional Recurrent Memory Layer solely to modeling chronological OS trajectory. We effectively download a "Static Master's Degree" into the model's spatial encoder on Epoch 0. The final artifact (`deadlock_temporal_model.pt`) perfectly houses the mathematical synthesis of **250,000 total combined OS simulations** across distinct geometric tensor domains (`[Nodes, Edges]` vs `[Time, Nodes, Edges]`).
+
 ### 3. Hybrid Ensemble (`deadlock_gnn/models/ensemble.py`)
 
 Before calling the GNN, the system runs a **classical Banker's Algorithm safety check**. If the state is provably safe, it outputs `SAFE` with high confidence immediately, skipping the neural path. If the classical algorithm is uncertain, it defers to the GNN. This hybrid approach is more trustworthy than pure ML.
