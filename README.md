@@ -28,13 +28,27 @@ The system spans three major capabilities that together form a coherent OS resea
 | Metric | Value |
 |---|---|
 | Static Model Accuracy (200k dataset) | **98.16%** |
-| F1 Score | **97.77%** |
-| AUC-ROC | **0.9990** |
-| AUC-PR | **0.9985** |
-| Inference Latency | **0.0007s per graph** |
+| Static F1 Score | **97.77%** |
+| Temporal Accuracy (50k sequence dataset) | **91.53%** |
+| Temporal F1 Score | **89.55%** |
+| AUC-ROC (Static / Temporal) | **0.9990** / **0.9667** |
+| Inference Latency | **0.0007s** (Graph) / **0.0028s** (Sequence) |
 | Dataset Generation Speed | **~1,100 graphs/second** |
 | Temporal Sequences Generated | **50,000** sequences @ 974 seq/sec |
 | Temporal Deadlock Balance | **42% deadlock rate** (near-ideal for ML) |
+
+---
+
+## 🖥 Multi-Tab Streamlit Interactive Application
+
+To demonstrate the real-world application of this research, the repository ships with a **Production-Grade Streamlit Web Application** (`demo.py`) featuring two distinct analytical modes:
+
+### Mode 1: Static Snapshot & Shapley XAI
+Instead of outputting simple confidence integers, the UI integrates **Monte Carlo Shapley Node Attributions**. When the model predicts an OS deadlock, the interface dynamically paints a heatmap directly onto the topological RAG graphic (via a `steelblue → darkorange → crimson` color map), visually flagging **exactly which OS processes are mechanically responsible for the crash**.
+*This bridges the gap between Black-Box neural networks and actionable Kernel-level interventions.*
+
+### Mode 2: Temporal Sequence Animation
+When engaging the "Temporal Sequence" tab, Streamlit natively spins up the Python `OSEngine` in memory. It simulates a raw OS timeline, captures 4 consecutive sequential snapshots, chains them into a PyTorch Geographic multidimensional tensor, and runs them through the **Recurrent GRU**. It natively outputs the *future trajectory probability* at `T+1` and provides an interactive slider to manually scrub through the chronological timeline frame-by-frame. 
 
 ---
 
@@ -77,7 +91,7 @@ Before calling the GNN, the system runs a **classical Banker's Algorithm safety 
 
 ### 4. Monte Carlo Shapley Explainer (`deadlock_gnn/explain/shapley.py`)
 
-Implements **Monte Carlo approximation of Shapley Values** from cooperative game theory. For each node in the graph, it computes that node's marginal contribution to the deadlock prediction score across T random permutations. This provides rigorous, theoretically grounded explanations of *why* the model predicted a deadlock.
+Implements **Monte Carlo approximation of Shapley Values** from cooperative game theory. For each node in the graph, it computes that node's marginal contribution to the deadlock prediction score across `T` random permutations. This provides rigorous, theoretically grounded explanations of *why* the model predicted a deadlock.
 
 ---
 
@@ -170,11 +184,12 @@ DeadlockPredictionUsingGNN/
 │   └── test_bankers.py            ← Unit tests for Banker's
 │
 ├── train.py                       ← Static training (in-memory, small datasets)
-├── train_massive.py               ← 🆕 Static training (disk-streaming, 200k+)
+├── train_massive.py               ← Static training (disk-streaming, 200k+)
 ├── train_temporal.py              ← 🆕 Temporal training (RGCN+GRU)
 ├── evaluate.py                    ← Evaluation (original dataset)
-├── evaluate_massive.py            ← 🆕 Evaluation (200k disk dataset)
-├── demo.py                        ← 🆕 Streamlit UI with Shapley XAI
+├── evaluate_massive.py            ← Evaluation (200k disk dataset)
+├── evaluate_temporal.py           ← 🆕 Evaluation (temporal sequence dataset)
+├── demo.py                        ← 🆕 Multi-Tab Streamlit UI with Shapley XAI
 │
 ├── ── LEGACY / REFERENCE FILES ──
 ├── deadlock_gnn.py                ← Original monolithic script (DO NOT use for training)
@@ -290,17 +305,22 @@ python train_temporal.py --dir dataset_temporal --epochs 10 --batch_size 32
 # Output: deadlock_temporal_model.pt, training_dashboard_temporal.png
 ```
 
-### 7. Launch the Interactive Streamlit Demo
+### 7. Evaluate the Temporal Model
+```bash
+python evaluate_temporal.py
+# Output: Evaluates the sequence matrices producing 91.53% Accuracy F1, Confusion Matrix
+```
+
+### 8. Launch the Interactive Streamlit Demo
 ```bash
 streamlit run demo.py
 ```
 In the UI:
-- Adjust **Processes, Resources, and probabilities** in the sidebar
-- Click **Generate RAG** to simulate a new OS snapshot
-- Toggle **Show Shapley Importance** to activate XAI coloring
-- Adjust **Top-K nodes** and **Monte Carlo Samples** to control explanation depth
+- **Tab 1: Static Snapshot & Shapley Analysis**: Generates OS snapshot and overlays XAI heatmap
+- **Tab 2: Temporal Sequence Animation**: Animates timeline frames running predictive GRU loop
+- Adjust parameters to manually scrub frames
 
-### 8. Run Unit Tests
+### 9. Run Unit Tests
 ```bash
 pytest tests/
 ```
@@ -321,17 +341,33 @@ Standard OS deadlock detection is a solved problem algorithmically (WFG, Banker'
 ## 📊 Results Summary
 
 ```
-Static Model (200k training graphs):
-  Accuracy  : 98.16%
-  Precision : 97.93%
-  Recall    : 97.62%
-  F1 Score  : 97.77%
-  AUC-ROC   : 0.9990
-  Latency   : 0.0007s per graph
+================================
+STATIC MODEL (200k Graphs)
+================================
+Accuracy  : 98.16%
+Precision : 97.93%
+Recall    : 97.62%
+F1 Score  : 97.77%
+AUC-ROC   : 0.9990
+Latency   : 0.0007s per graph
 
-Confusion Matrix (40,000 test graphs):
+Confusion Matrix (40,000 Test graphs):
   TN: 23,083   FP: 342
   FN: 395      TP: 16,180
+
+================================
+TEMPORAL SEQUENCE GRU (10k Sequences)
+================================
+Accuracy  : 91.53%
+Precision : 92.60%
+Recall    : 86.70%
+F1 Score  : 89.55%
+AUC-ROC   : 0.9667
+Latency   : 0.0028s per sequence
+
+Confusion Matrix (10,000 Test sequences):
+  TN: 5,523    FP: 290
+  FN: 557      TP: 3,630
 ```
 
 ---

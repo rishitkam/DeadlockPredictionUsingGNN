@@ -72,9 +72,28 @@ def main():
         print("AUC-ROC  : N/A (Only one class present)")
 
     print(f"Latency  : {latency:.4f}s per graph")
-    
+    print()
     print("Confusion Matrix (TN FP / FN TP):")
-    print(confusion_matrix(all_labels, all_preds))
+    cm = confusion_matrix(all_labels, all_preds)
+    print(cm)
+    
+    # Save Visual Confusion Matrix
+    plt.figure(figsize=(6, 5))
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title('Massive Confusion Matrix')
+    plt.colorbar()
+    plt.xticks([0, 1], ['SAFE (0)', 'DEADLOCK (1)'])
+    plt.yticks([0, 1], ['SAFE (0)', 'DEADLOCK (1)'])
+    for i in range(2):
+        for j in range(2):
+            plt.text(j, i, format(cm[i, j], 'd'),
+                     ha="center", va="center",
+                     color="white" if cm[i, j] > cm.max() / 2. else "black")
+    plt.tight_layout()
+    plt.ylabel('Actual Label')
+    plt.xlabel('Predicted Label')
+    plt.savefig('confusion_matrix_massive.png')
+    plt.close()
     
     # Save ROC Curve
     plt.figure()
