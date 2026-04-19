@@ -89,3 +89,23 @@ class TemporalRGCNGRU(nn.Module):
         last_hidden = h_n[-1]
 
         return self.classifier(last_hidden)  # [B, 1]
+
+    def load_static_weights(self, path="deadlock_rgcn_massive.pt", device=None):
+        """
+        Transfer Learning: Loads weights from the natively trained 200k static model
+        into the temporal encoder so it does not have to learn graph topologies from scratch.
+        """
+        if device is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            
+        try:
+            ckpt = torch.load(path, map_location=device, weights_only=False)
+            state_dict = ckpt["model_state"] if "model_state" in ckpt else ckpt
+            
+            # Map static DeadlockRGCN weights to TemporalRGCNGRU spatial layers
+            self.conv1.load_state_dict({k.replace("conv1.", ""): v for k, v in state_dict.items() if k.startswith("conv1.")})
+            self.conv2.load_state_dict({k.replace("conv2.", ""): v for k, v in state_dict.items() if k.startswith("conv2.")})
+            self.conv3.load_state_dict({k.replace("conv3.", ""): v for k, v in state_dict.items() if k.startswith("conv3.")})
+            print(f"🧬 Successfully injected Massive Static RGCN weights from {path} into Temporal Encoder!")
+        except Exception as e:
+            print(f"⚠️ Could not load static weights for transfer learning: {e}")

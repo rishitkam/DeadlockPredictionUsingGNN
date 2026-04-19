@@ -49,10 +49,10 @@ def collate_temporal(batch):
 
 # ── Training Loop ─────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description="Train Temporal RGCN+GRU")
-    parser.add_argument("--dir", default="dataset_temporal")
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=32)
+    parser = argparse.ArgumentParser(description="Train Temporal RGCN+GRU Model")
+    parser.add_argument('--dir', type=str, default="dataset_temporal", help="Directory containing sequence .pt files")
+    parser.add_argument('--epochs', type=int, default=30, help="Number of training epochs (default 30 for transfer learning)")
+    parser.add_argument('--batch_size', type=int, default=32, help="Batch size for sequences")
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--hidden", type=int, default=64)
     parser.add_argument("--gru_hidden", type=int, default=128)
@@ -85,6 +85,9 @@ def main():
         num_gru_layers=2,
         dropout=0.3,
     ).to(device)
+
+    # [Transfer Learning] Inject static weights into the spatial encoder
+    model.load_static_weights("deadlock_rgcn_massive.pt", device=device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = nn.BCEWithLogitsLoss()

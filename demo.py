@@ -150,7 +150,7 @@ with tab2:
     
     with t_col1:
         st.header("⏱️ Sequence Generation")
-        seq_len = st.slider("Time-Steps to Simulate", 3, 6, 4)
+        seq_len = st.slider("Time-Steps to Simulate", 3, 10, 8)
         interval = st.slider("OS Ticks per Step", 1, 10, 5)
         
         generate_temporal = st.button("🌌 Simulate Flow of Time", use_container_width=True)
