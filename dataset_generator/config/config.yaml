@@ -1,0 +1,25 @@
+# dataset_generator/config/config.yaml
+# Production-Grade Operating System Simulated Workload configuration
+
+simulation:
+  steps: 50
+  poisson_lambda: 1.5           # Average number of process arrivals per tick
+  seed: 42
+  
+os_environment:
+  number_of_resources: 15
+  max_resource_capacity: 3      # Simulate multi-core/threaded resources
+  max_process_burst: 5          # Number of processes spawned if a "burst" happens
+  burst_probability: 0.05
+  
+process_behavior:
+  min_requests_per_process: 2
+  max_requests_per_process: 6
+  hold_duration_min: 3          # Ticks a process holds a resource before dropping it
+  hold_duration_max: 10
+  priority_inversion_enabled: false
+
+generator:
+  dataset_size: 5000            # Total graphs to generate
+  output_dir: "dataset"
+  num_workers: 4                # Multiprocessing pool size
