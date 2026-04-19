@@ -20,6 +20,6 @@ process_behavior:
   priority_inversion_enabled: false
 
 generator:
-  dataset_size: 5000            # Total graphs to generate
+  dataset_size: 200000            # Total graphs to generate
   output_dir: "dataset"
-  num_workers: 4                # Multiprocessing pool size
+  num_workers: 8                # Multiprocessing pool size
