@@ -138,9 +138,9 @@ def main():
     is_rgcn = (model_type == "rgcn")
     
     if is_rgcn:
-        model = DeadlockRGCN(in_channels=8, hidden_channels=config["hidden_channels"], num_relations=2, dropout=config["dropout"]).to(device)
+        model = DeadlockRGCN(in_channels=7, hidden_channels=config["hidden_channels"], num_relations=2, dropout=config["dropout"]).to(device)
     else:
-        model = DeadlockGNN(in_channels=8, hidden_channels=config["hidden_channels"], dropout=config["dropout"]).to(device)
+        model = DeadlockGNN(in_channels=7, hidden_channels=config["hidden_channels"], dropout=config["dropout"]).to(device)
         
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"])
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)

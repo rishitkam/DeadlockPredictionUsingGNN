@@ -20,7 +20,7 @@ def load_model():
     hidden = config.get("hidden_channels", 64)
     dropout = config.get("dropout", 0.5)
     
-    model = DeadlockRGCN(in_channels=8, hidden_channels=hidden, num_relations=2, dropout=dropout)
+    model = DeadlockRGCN(in_channels=7, hidden_channels=hidden, num_relations=2, dropout=dropout)
     model.load_state_dict(ckpt["model_state"])
     model.eval()
     return model
