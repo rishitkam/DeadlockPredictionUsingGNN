@@ -1,0 +1,8 @@
+torch>=2.0.0
+torch_geometric>=2.3.0
+networkx>=3.0
+scikit-learn>=1.2.2
+streamlit>=1.20.0
+matplotlib>=3.7.0
+pyyaml>=6.0
+pytest>=7.0.0
