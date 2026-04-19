@@ -15,9 +15,16 @@ Based on specifications adapted from modern architecture research (DRIP Framewor
 
 ---
 
-## 📈 The Dataset & Features Environment
+## 📈 Dataset Architecture & Real-World Applicability
 
-There is no external `.csv` or downloaded dataset. The pipeline is **completely self-sustaining** through randomized graph generation simulating real environments!
+While finding massive, structured `.csv` datasets of naturally occurring OS deadlocks is notoriously difficult (because schedulers kill deadlocks before logging them), this project bridges the gap by natively generating **High-Fidelity Synthetic Scenarios** designed to mimic real-world parallel computing workloads!
+
+If you wish to augment this architecture with real industry data, the data ingestion pipeline (`data/converter.py`) is designed to easily map traces from:
+*   **Google & Alibaba Cluster Traces**: Reconstructing cluster requests into multi-instance RAG graphs.
+*   **DeadlockBench / Joern CPGs**: Mapping raw thread-mutex Code Property Graphs directly into our 7-dimensional node tensors.
+*   **Parallel Workload Archives**: Extracting resource starvation states from HPC logs.
+
+For the default pipeline, there is no external `.csv` download required. The system is **completely self-sustaining**:
 
 ### How the Data is Generated (`data/generator.py`):
 - During training, the command calls `generate_rag()`. It randomly instantiates $P$ processes and $R$ resources.

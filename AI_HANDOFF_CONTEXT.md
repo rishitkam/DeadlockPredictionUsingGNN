@@ -53,6 +53,7 @@ The user and AI discussed theoretical future steps:
 ---
 
 ## 🚦 Next Steps / Prompt Ideas for the Next AI
-1. **Temporal Sequences (Ablation):** The generator yields *static* snapshots. The next jump involves time-series RAG evolution using GRUs (updating node states dynamically tick-by-tick).
-2. **XV6 Integration (C/Python API):** Building a serial-port host watcher that scans XV6 `proc.c` outputs, builds the RAG locally using this pipeline, and pipes a `kill` OS trap back into QEMU.
-3. **Advanced UI Explanations:** Actively drawing the Shapley Values inside the `.png` Node Visualizer in `demo.py`.
+1. **Real-World Trace Integrations:** Implementing data processors mapping real trace datasets (Google/Alibaba Cluster Traces, DeadlockBench, Joern CPGs) into the `converter.py` PyG structures for authentic production training.
+2. **Temporal Sequences (Ablation):** The generator currently yields *static* snapshots. The next jump involves time-series RAG evolution using GRUs (updating node states dynamically tick-by-tick).
+3. **XV6 Integration (C/Python API):** Building a serial-port host watcher that scans XV6 `proc.c` outputs, builds the RAG locally using this pipeline, and pipes a `kill` OS trap back into QEMU.
+4. **Advanced UI Explanations:** Actively drawing the Shapley Values inside the `.png` Node Visualizer in `demo.py`.
