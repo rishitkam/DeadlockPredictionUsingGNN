@@ -17,7 +17,7 @@ class DiskRAGDataset(torch.utils.data.Dataset):
         return len(self.pt_files)
         
     def __getitem__(self, idx):
-        return torch.load(self.pt_files[idx])
+        return torch.load(self.pt_files[idx], weights_only=False)
 
 def main():
     parser = argparse.ArgumentParser(description="Train RGCN on Massive Disk Dataset")
