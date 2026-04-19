@@ -99,7 +99,13 @@ def main():
         g = generate_rag(p_count, r_count, max_capacity=max_capacity)
         if len(g.edges) == 0: continue
         
-        data = convert_to_pyg_data(g, 0)
+        resources = [n for n, d in g.nodes(data=True) if d.get('node_type') == 'resource']
+        from deadlock_gnn.algorithms.wfg import build_wfg, detect_cycle_dfs
+        wfg = build_wfg(g, resources)
+        is_dl, _ = detect_cycle_dfs(wfg)
+        true_label = 1.0 if is_dl else 0.0
+        
+        data = convert_to_pyg_data(g, true_label)
         label = data.y.item()
         
         if label == 1.0 and num_deadlocked >= target_per_class:
@@ -148,12 +154,16 @@ def main():
     patience_count = 0
     best_state = None
 
+    history = {'train_loss': [], 'val_f1': []}
+
     for epoch in range(1, epochs + 1):
         train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, is_rgcn)
         scheduler.step()
 
         val_labels, val_preds, val_probs = evaluate(model, val_loader, device, is_rgcn)
         val_f1 = f1_score(val_labels, val_preds, zero_division=0)
+        history['train_loss'].append(train_loss)
+        history['val_f1'].append(val_f1)
         try:
             val_auc = roc_auc_score(val_labels, val_probs)
         except ValueError:
@@ -185,6 +195,18 @@ def main():
 
     # Also save the test set for evaluate.py
     torch.save(test_ds, "test_dataset.pt")
+
+    import matplotlib.pyplot as plt
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    ax1.plot(history['train_loss'])
+    ax1.set_title('Training Loss')
+    ax1.set_xlabel('Epoch')
+    ax2.plot(history['val_f1'])
+    ax2.set_title('Validation F1')
+    ax2.set_xlabel('Epoch')
+    plt.savefig('training_dashboard.png')
+    plt.close()
+    logging.info('Saved training dashboard to training_dashboard.png')
 
 if __name__ == "__main__":
     main()

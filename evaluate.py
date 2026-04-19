@@ -65,6 +65,35 @@ def evaluate_model(model_path, dataset_path="test_dataset.pt", is_rgcn=True):
     print(f"Latency  : {latency:.4f}s")
     print(f"Confusion Matrix (TN FP / FN TP):\n{cm}")
     
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import roc_curve, precision_recall_curve
+    
+    try:
+        fpr, tpr, _ = roc_curve(all_labels, all_probs)
+        plt.figure()
+        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {auc:.2f})')
+        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver Operating Characteristic')
+        plt.legend(loc="lower right")
+        plt.savefig('roc_curve.png')
+        plt.close()
+        
+        precision, recall, _ = precision_recall_curve(all_labels, all_probs)
+        plt.figure()
+        plt.plot(recall, precision, color='blue', lw=2, label=f'PR curve (area = {pr_auc:.2f})')
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.title('Precision-Recall Curve')
+        plt.legend(loc="lower left")
+        plt.savefig('pr_curve.png')
+        plt.close()
+        
+        print("Saved ROC and PR curves to roc_curve.png and pr_curve.png")
+    except Exception as e:
+        print(f"Could not save curves: {e}")
+
     return acc, prec, rec, f1
 
 if __name__ == "__main__":
