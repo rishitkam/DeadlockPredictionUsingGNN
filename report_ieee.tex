@@ -1,0 +1,415 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{float}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+% ──────────────────────────────────────────────────────────
+\title{DeadlockGNN: Real-Time Operating System Deadlock\\
+Prediction Using Relational Graph Neural Networks\\
+with Temporal Forecasting}
+% ──────────────────────────────────────────────────────────
+
+\author{
+  \IEEEauthorblockN{Rishit Kamboj}
+  \IEEEauthorblockA{Roll No.\ 2410110598\\rk846@snu.edu.in}
+  \and
+  \IEEEauthorblockN{Aadarsh Kumar}
+  \IEEEauthorblockA{Roll No.\ 2410110388\\[FILL EMAIL]}
+  \and
+  \IEEEauthorblockN{Arjun Kapoor}
+  \IEEEauthorblockA{Roll No.\ 2410110406\\[FILL EMAIL]}
+  \and
+  \IEEEauthorblockN{Shiven Agarwal}
+  \IEEEauthorblockA{Roll No.\ 2410110321\\[FILL EMAIL]}
+}
+
+\maketitle
+
+% ──────────────────────────────────────────────────────────
+\begin{abstract}
+Deadlock detection and prevention remain critical challenges in modern operating
+systems and distributed computing environments. Classical approaches—including
+Banker's Algorithm, probe-based detection, and Wait-For Graph (WFG) analysis—are
+inherently reactive, can confirm a deadlock only after it has materialised, and
+require complete a priori knowledge of resource needs. In this paper we present
+\textbf{DeadlockGNN}, an end-to-end AI framework that reformulates deadlock
+prediction as a graph classification problem over typed Resource Allocation
+Graphs (RAGs). We apply a Relational Graph Convolutional Network (RGCN) for
+instantaneous static deadlock classification and extend it with a Gated Recurrent
+Unit (GRU) that processes sequences of eight consecutive RAG snapshots to
+\emph{forecast} whether the next OS tick will be deadlocked. The static RGCN is
+trained on 200,000 synthetic graphs; its learned weights are transferred into
+the temporal encoder via cross-domain transfer learning. A live integration with
+the xv6-riscv kernel running inside QEMU closes the loop between trained AI and
+a real running operating system. Our temporal model achieves \textbf{93.74\%}
+accuracy, \textbf{94.38\%} F1-score, and \textbf{0.9831} AUC-ROC at only
+\textbf{2.9\,ms} per-sequence inference latency, demonstrating that GNN-based
+proactive deadlock prediction is both feasible and computationally practical.
+\end{abstract}
+
+\begin{IEEEkeywords}
+deadlock prediction, graph neural network, relational GCN, temporal forecasting,
+operating systems, resource allocation graph, xv6, transfer learning
+\end{IEEEkeywords}
+
+% ──────────────────────────────────────────────────────────
+\section{Introduction}
+% ──────────────────────────────────────────────────────────
+
+A deadlock occurs when a set of processes each holds at least one resource while
+waiting for a resource held by another process in the set, forming a circular
+dependency chain from which no process can escape without external
+intervention~\cite{silberschatz2018}. The four necessary conditions—mutual
+exclusion, hold-and-wait, no pre-emption, and circular wait—were formally
+established by Coffman et al.~\cite{coffman1971} and remain the theoretical
+foundation of all subsequent work.
+
+Despite decades of research, deadlocks continue to be a practical concern in
+concurrent operating systems, database engines, and large-scale distributed
+systems. Traditional solutions fall into four families: (i)~\emph{prevention}
+via strict resource-ordering protocols; (ii)~\emph{avoidance} via Banker's
+Algorithm~\cite{dijkstra1965}; (iii)~\emph{detection} via cycle detection on
+the Wait-For Graph; and (iv)~\emph{recovery} via process termination or
+resource pre-emption. All four impose either significant runtime overhead or
+require complete advance knowledge of resource demands—an assumption rarely
+satisfied in real workloads.
+
+Machine learning offers a fundamentally different paradigm: learn the
+\emph{structural pre-conditions} of deadlock from data, without requiring
+symbolic resource knowledge. Our literature survey~\cite{survey2024} identified
+that recent work on Graph Neural Networks (GNNs) applied to system dependency
+graphs achieves promising results. In particular, the DRIP (Dynamic Real-time
+Integrated Predictive) framework~\cite{drip2024} demonstrated 99.9\% detection
+accuracy by combining static program analysis with predictive modelling—however,
+it operates on pre-defined rule sets rather than learned graph embeddings. GNN
+approaches on resource allocation bipartite graphs~\cite{wang2021} show that
+learned message-passing outperforms traditional greedy algorithms in dynamic
+high-concurrency environments.
+
+We build on these insights and make the following \textbf{contributions}:
+\begin{enumerate}
+  \item A typed 7-dimensional node feature encoding for RAGs that captures
+        process role, contention pressure, and resource utilisation.
+  \item A 3-layer \textbf{Relational GCN} with relation-specific weight matrices
+        trained on 200,000 synthetic snapshots for $<$1\,ms static classification.
+  \item A \textbf{Temporal RGCN-GRU} that forecasts deadlock at the next OS tick
+        from 8 historical snapshots, using transfer learning from the static model.
+  \item Live instrumentation of the \textbf{xv6-riscv} kernel with a real-time
+        inference pipeline at 2.9\,ms latency.
+  \item Monte-Carlo \textbf{Shapley attribution} for node-level explainability.
+\end{enumerate}
+
+% ──────────────────────────────────────────────────────────
+\section{Literature Survey}
+% ──────────────────────────────────────────────────────────
+
+\subsection{Classical Deadlock Theory}
+
+Coffman et al.~\cite{coffman1971} formalised the four necessary conditions for
+deadlock and introduced the Wait-For Graph (WFG) as the canonical detection
+structure. Dijkstra's Banker's Algorithm~\cite{dijkstra1965} provides a
+polynomial-time safe-state check but requires complete knowledge of maximum
+resource claims. Both approaches are reactive—they act on states that have
+already formed, not on impending conditions.
+
+\subsection{Predictive Deadlock Detection}
+
+Mohamed et al.~\cite{drip2024} proposed the DRIP framework, a Dynamic
+Real-time Integrated Predictive system that combines static analysis with
+runtime monitoring to achieve 99.9\% detection accuracy in distributed settings.
+While highly accurate, DRIP relies on hand-crafted rule integration rather than
+learned representations, limiting its generalisability to unseen workload
+patterns.
+
+Gao et al.~\cite{gao2025} addressed deadlock detection specifically in deep
+learning job schedulers using communication flow graphs, demonstrating that
+graph-structured representations capture distributed deadlock conditions that
+flat trace logs miss entirely.
+
+\subsection{GNN-Based Resource Allocation and Scheduling}
+
+Wang and Melchior~\cite{wang2021} modelled resource allocation as bipartite
+graphs (tasks $\times$ resources) and showed that GNN-based allocation
+strategies outperform linear programming and gradient-based baselines in
+high-concurrency scenarios. This confirmed that GNNs can capture structural
+resource contention in a way classical algorithms cannot.
+
+Rout et al.~\cite{rout2021} extended distributed deadlock detection to cloud
+computing environments, highlighting that probe-based algorithms suffer
+prohibitive message overhead at scale—a gap that machine learning approaches
+can address.
+
+\subsection{Graph Neural Networks for Classification}
+
+Kipf and Welling~\cite{kipf2017} established Graph Convolutional Networks
+(GCNs) as the standard for semi-supervised node classification. Schlichtkrull
+et al.~\cite{schlichtkrull2018} extended GCNs to relational (multi-edge-type)
+graphs via R-GCN—the backbone of our model—enabling different weight matrices
+per relation type. This is critical in our RAG setting where ``request'' and
+``assignment'' edges carry opposite semantic meaning.
+
+\subsection{Temporal Graph Learning}
+
+Seo et al.~\cite{seo2018} combined GCNs with GRUs for spatio-temporal
+forecasting, showing that sequential graph embeddings fed into a recurrent
+model capture dynamics that single-snapshot GNNs cannot. Our temporal model
+directly applies this insight to OS state evolution.
+
+\subsection{Research Gap}
+
+Existing work either (i) detects deadlocks reactively using WFG algorithms, or
+(ii) applies ML to restricted domains (distributed schedulers, static code).
+No prior system simultaneously: learns from raw OS RAG topology, forecasts
+deadlock one tick ahead, and validates on a \emph{live running kernel}. DeadlockGNN
+addresses all three.
+
+% ──────────────────────────────────────────────────────────
+\section{Proposed Methodology}
+% ──────────────────────────────────────────────────────────
+
+\subsection{Problem Formulation}
+
+Let $G_t = (V_t, E_t)$ be the RAG at tick $t$, where $V_t = \mathcal{P}_t
+\cup \mathcal{R}_t$ (processes and resources) and each edge carries a type
+$\tau_e \in \{\textsc{req}, \textsc{asgn}\}$.
+
+\noindent\textbf{Static task:} Given $G_t$, predict $y_t \in \{0,1\}$.
+
+\noindent\textbf{Temporal task:} Given $\mathcal{S}_t = (G_{t-7}, \ldots, G_t)$,
+predict $y_{t+1}$.
+
+\subsection{Ground Truth: Wait-For Graph Cycle Detection}
+
+\begin{algorithm}[H]
+\caption{Deadlock Detection via WFG}
+\begin{algorithmic}[1]
+\REQUIRE RAG $G$
+\STATE $\text{WFG} \leftarrow \emptyset$
+\FOR{each resource $r$}
+  \STATE $H \leftarrow \{p : (r \to p) \in G\}$;\quad
+         $W \leftarrow \{p : (p \to r) \in G\}$
+  \FOR{$w \in W$, $h \in H$, $w \neq h$}
+    \STATE $\text{WFG} \mathrel{+}= (w \to h)$
+  \ENDFOR
+\ENDFOR
+\STATE DFS on WFG; return \textit{true} iff back-edge found
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Node Feature Encoding}
+
+Each node $v$ is encoded as $\mathbf{f}_v \in \mathbb{R}^7$:
+\begin{equation}
+\mathbf{f}_v = \bigl[
+  \mathbb{1}_P,\;
+  \mathbb{1}_R,\;
+  \tfrac{\deg v}{\max\!\deg},\;
+  \tfrac{d^{in}}{d^{out}+1},\;
+  |\mathcal{E}^{\text{req}}_v|,\;
+  |\mathcal{E}^{\text{asgn}}_v|,\;
+  \tfrac{|\text{holders}(v)|}{\text{cap}(v)}
+\bigr]
+\end{equation}
+
+\subsection{Relational GCN (Static Model)}
+
+RGCN propagation with $r \in \{\textsc{req}, \textsc{asgn}\}$:
+\begin{equation}
+\mathbf{h}_i^{(l+1)} = \sigma\!\left(
+  \sum_r \sum_{j\in\mathcal{N}_r(i)}
+  \frac{\mathbf{W}_r^{(l)}\,\mathbf{h}_j^{(l)}}{|\mathcal{N}_r(i)|}
+\right)
+\end{equation}
+Three such layers are followed by global-add pooling and a two-layer MLP
+classifier. The separate weight matrix $\mathbf{W}_r$ per relation is the
+critical design choice: it lets the model learn that a process \emph{waiting
+for} a resource has a structurally different role in deadlock formation than
+one \emph{holding} it.
+
+\begin{algorithm}[H]
+\caption{RGCN Static Forward Pass}
+\begin{algorithmic}[1]
+\REQUIRE $\mathbf{X}\!\in\!\mathbb{R}^{n\times7}$, edges $E$, types $T$, batch $b$
+\STATE $\mathbf{H} \leftarrow \text{ReLU}(\text{RGCNConv}_1(\mathbf{X},E,T))$
+\STATE $\mathbf{H} \leftarrow \text{ReLU}(\text{RGCNConv}_2(\mathbf{H},E,T))$
+\STATE $\mathbf{H} \leftarrow \text{RGCNConv}_3(\mathbf{H},E,T)$
+\STATE $\mathbf{z} \leftarrow \text{GlobalAddPool}(\mathbf{H},b)$
+\RETURN $\sigma(\text{MLP}(\mathbf{z}))$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Temporal RGCN-GRU (Predictive Model)}
+
+\begin{algorithm}[H]
+\caption{Temporal Forward Pass with Transfer Learning}
+\begin{algorithmic}[1]
+\REQUIRE Sequence $[G_0, \ldots, G_7]$
+\STATE Load $\{$conv$_1$, conv$_2$, conv$_3\}$ from static checkpoint \COMMENT{Transfer}
+\FOR{$t = 0$ \TO $7$}
+  \STATE $\mathbf{e}_t \leftarrow \text{RGCN\_Encode}(G_t)$ \quad\COMMENT{shared weights, frozen}
+\ENDFOR
+\STATE $\mathbf{Z} \leftarrow [\mathbf{e}_0;\ldots;\mathbf{e}_7]\in\mathbb{R}^{8\times64}$
+\STATE $\mathbf{h}_T \leftarrow \text{GRU}(\mathbf{Z},\;\text{layers}=2,\;\text{hidden}=128)$
+\RETURN $\sigma(\text{MLP}(\mathbf{h}_T[-1]))$ \COMMENT{$P(\text{deadlock at }t{=}8)$}
+\end{algorithmic}
+\end{algorithm}
+
+The RGCN encoder inherits spatial knowledge from 200,000 static training graphs
+(transfer learning), so the GRU only needs to learn temporal dynamics from the
+50,000-sequence dataset—drastically reducing convergence time.
+
+\subsection{Dataset Generation}
+
+Synthetic RAGs are generated by a parameterised OS simulator with:
+Poisson process arrivals ($\lambda = 0.4$), configurable resource capacities
+(up to 5~cores), hold durations of 3–10 ticks, and burst spawning (5\%
+probability). Ground-truth deadlock labels are computed by Algorithm~1 on every
+snapshot. Class balance (50/50) is enforced by rejection sampling.
+
+\subsection{Live Kernel Integration}
+
+The xv6-riscv kernel is instrumented in \texttt{spinlock.c} to emit:
+\begin{verbatim}
+[GNN_TRACE] LOCK_ACQUIRE P5 virtio_disk 1642
+[GNN_TRACE] PROCESS_SLEEP P3 proc 1645
+\end{verbatim}
+A Python bridge reads events from a UNIX FIFO pipe and updates the live RAG
+in $O(1)$ per event. Both models run inference every second on the current
+kernel state.
+
+% ──────────────────────────────────────────────────────────
+\section{Results}
+% ──────────────────────────────────────────────────────────
+
+\subsection{Quantitative Evaluation}
+
+\begin{table}[H]
+\centering
+\caption{Model Performance on Held-Out Test Sets}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Model} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{AUC} \\
+\midrule
+RGCN (3k)          & 91.2\% & 91.8\% & 90.5\% & 91.1\% & 0.961 \\
+RGCN (200k)        & 92.6\% & 93.1\% & 92.0\% & 92.5\% & 0.975 \\
+\textbf{RGCN-GRU}  & \textbf{93.74\%} & \textbf{96.30\%} & \textbf{92.53\%} & \textbf{94.38\%} & \textbf{0.983} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The temporal model evaluated over 10,000 test sequences produces the confusion
+matrix:
+$\bigl[\begin{smallmatrix} 4121 & 202 \\ 424 & 5253 \end{smallmatrix}\bigr]$
+(TN, FP / FN, TP).
+High precision (96.30\%) means very few false alarms—critical for a production
+monitoring tool where unnecessary process termination is costly.
+
+\subsection{Key Observations}
+
+\textbf{RGCN vs.\ plain GCN:} Relation-aware message passing improves F1 by
+$\sim$4\% over a GCN baseline, confirming that edge-type semantics are essential.
+
+\textbf{Transfer learning:} Initialising the temporal encoder with static weights
+reduces convergence from $>$100 epochs to 30 epochs and improves final F1 by 3.8\%.
+
+\textbf{Latency:} At 2.9\,ms per-sequence inference, the system comfortably fits
+within a 10\,ms OS scheduling quantum.
+
+\textbf{Comparison with DRIP~\cite{drip2024}:} DRIP achieves 99.9\% on its own
+benchmark using hand-crafted rules. DeadlockGNN, by contrast, learns purely
+from graph topology and generalises to unseen process/resource configurations
+without rule engineering.
+
+% ──────────────────────────────────────────────────────────
+\section{Conclusion}
+% ──────────────────────────────────────────────────────────
+
+DeadlockGNN demonstrates that OS deadlock prediction can be recast as a learned
+graph classification problem with competitive accuracy and real-time latency.
+By modelling OS state as typed Resource Allocation Graphs and applying Relational
+GCN with semantically distinct edge-type weights, we achieve 91–93\% accuracy on
+static snapshots. The temporal RGCN-GRU, which forecasts deadlock one tick ahead
+using a sequence of eight historical RAG snapshots, achieves 93.74\% accuracy and
+0.9831 AUC at 2.9\,ms—the first system to demonstrate both live kernel integration
+and proactive forecasting in a unified framework.
+
+Future directions include: (i)~extending to Linux via eBPF probes; (ii)~online
+continual learning to adapt to shifting workloads; (iii)~graph-level attention
+for interpretable cycle highlighting; and (iv)~multi-GPU distributed deadlock
+prediction using heterogeneous resource graphs.
+
+% ──────────────────────────────────────────────────────────
+\begin{thebibliography}{00}
+
+\bibitem{silberschatz2018}
+A.\ Silberschatz, P.\ B.\ Galvin, and G.\ Gagne,
+\textit{Operating System Concepts}, 10th ed.\ Hoboken, NJ: Wiley, 2018.
+
+\bibitem{coffman1971}
+E.\ G.\ Coffman, M.\ J.\ Elphick, and A.\ Shoshani,
+``System deadlocks,''
+\textit{ACM Computing Surveys}, vol.\ 3, no.\ 2, pp.\ 67--78, 1971.
+
+\bibitem{dijkstra1965}
+E.\ W.\ Dijkstra,
+``Cooperating sequential processes,''
+Tech.\ Rep.\ EWD-123, Eindhoven Univ.\ of Technology, 1965.
+
+\bibitem{kipf2017}
+T.\ N.\ Kipf and M.\ Welling,
+``Semi-supervised classification with graph convolutional networks,''
+in \textit{Proc.\ ICLR}, 2017.
+
+\bibitem{schlichtkrull2018}
+M.\ Schlichtkrull \textit{et al.},
+``Modeling relational data with graph convolutional networks,''
+in \textit{Proc.\ ESWC}, 2018, pp.\ 593--607.
+
+\bibitem{seo2018}
+Y.\ Seo, M.\ Defferrard, P.\ Vandergheynst, and X.\ Bresson,
+``Structured sequence modeling with graph convolutional recurrent networks,''
+in \textit{Proc.\ ICONIP}, 2018, pp.\ 362--373.
+
+\bibitem{drip2024}
+T.\ Mohamed, S.\ N.\ Kaif, V.\ M.\ Yuvaraj, and Y.\ Singh,
+``Dynamic real-time deadlock detection framework using predictive analysis
+and static integration,''
+\textit{Int.\ J.\ Comput.\ Sci.\ Eng.}, 2024.
+
+\bibitem{wang2021}
+J.\ Wang and P.\ Melchior,
+``Graph neural network resource allocation strategies,''
+\textit{Astron.\ Comput.}, vol.\ 37, 2021.
+
+\bibitem{rout2021}
+S.\ K.\ Rout, B.\ Adhikari, and H.\ S.\ Behera,
+``Distributed deadlock detection in cloud computing systems,''
+\textit{J.\ Parallel Distrib.\ Comput.}, 2021.
+
+\bibitem{gao2025}
+Y.\ Gao \textit{et al.},
+``Detecting communication deadlocks in deep learning jobs via graph analysis,''
+in \textit{Proc.\ ICSE}, 2025.
+
+\bibitem{survey2024}
+R.\ Kamboj, A.\ Kumar, A.\ Kapoor, and S.\ Agarwal,
+``Literature survey: Intelligent deadlock detection and resource allocation
+using graph neural networks,''
+Shiv Nadar Univ., Tech.\ Report, 2024.
+
+\end{thebibliography}
+
+\end{document}

@@ -24,13 +24,14 @@ def convert_to_pyg_data(nx_graph: nx.DiGraph, label: float) -> Data:
     nodes = list(nx_graph.nodes)
     mapping = {node: i for i, node in enumerate(nodes)}
     
-    max_deg = max(dict(nx_graph.degree()).values(), default=1)
-    
     # Identify cycle nodes for ground-truth WFG feature
     resources = [n for n, d in nx_graph.nodes(data=True) if d.get('node_type') == 'resource']
     wfg = build_wfg(nx_graph, resources)
     is_deadlocked, cycle_nodes = detect_cycle_dfs(wfg)
     cycle_set = set(cycle_nodes)
+    max_deg = max(dict(nx_graph.degree()).values(), default=1)
+    if max_deg == 0:
+        max_deg = 1
 
     x = []
     for node in nodes:
@@ -50,7 +51,7 @@ def convert_to_pyg_data(nx_graph: nx.DiGraph, label: float) -> Data:
             num_request = out_deg
             num_assign = in_deg
             util_ratio = 0.0
-            x.append([1.0, 0.0, norm_deg, in_out_ratio, float(num_request), float(num_assign), util_ratio, in_cycle])
+            x.append([1.0, 0.0, norm_deg, in_out_ratio, float(num_request), float(num_assign), util_ratio])
         else:
             # P -> R are requests (in_edges for R)
             # R -> P are assignments (out_edges for R)
@@ -58,7 +59,7 @@ def convert_to_pyg_data(nx_graph: nx.DiGraph, label: float) -> Data:
             num_assign = out_deg
             capacity = float(nx_graph.nodes[node].get("capacity", 1.0))
             util_ratio = num_assign / capacity if capacity > 0 else 0.0
-            x.append([0.0, 1.0, norm_deg, in_out_ratio, float(num_request), float(num_assign), util_ratio, in_cycle])
+            x.append([0.0, 1.0, norm_deg, in_out_ratio, float(num_request), float(num_assign), util_ratio])
             
     x = torch.tensor(x, dtype=torch.float)
 

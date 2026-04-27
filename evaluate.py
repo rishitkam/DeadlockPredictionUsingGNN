@@ -18,9 +18,9 @@ def evaluate_model(model_path, dataset_path="test_dataset.pt", is_rgcn=True):
     dropout = config.get("dropout", 0.5)
     
     if is_rgcn:
-        model = DeadlockRGCN(in_channels=8, hidden_channels=hidden, num_relations=2, dropout=dropout).to(device)
+        model = DeadlockRGCN(in_channels=7, hidden_channels=hidden, num_relations=2, dropout=dropout).to(device)
     else:
-        model = DeadlockGNN(in_channels=8, hidden_channels=hidden, dropout=dropout).to(device)
+        model = DeadlockGNN(in_channels=7, hidden_channels=hidden, dropout=dropout).to(device)
         
     model.load_state_dict(ckpt["model_state"])
     model.eval()
